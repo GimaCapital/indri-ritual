@@ -38,8 +38,8 @@ function validateTelegram(req, res, next) {
   const initData = req.headers['x-telegram-init-data'];
   if (!initData) return res.status(401).json({ error: 'Missing initData' });
   try {
-    // validate(initData, BOT_TOKEN);
-    validate(initData, BOT_TOKEN, { expiresIn: 7 * 24 * 60 * 60 * 1000 });
+    validate(initData, BOT_TOKEN);
+    // validate(initData, BOT_TOKEN, { expiresIn: 7 * 24 * 60 * 60 * 1000 });
     const parsed = parse(initData);
     req.telegramUser = parsed.user;
     next();
@@ -81,13 +81,18 @@ app.post('/api/validate-invite', async (req, res) => {
   res.json({ valid: true });
 });
 
-// ============ AUTH ============
+// ============ AUTH (sequential entry numbers) ============
 app.post('/api/auth', validateTelegram, async (req, res) => {
   const telegramId = req.telegramUser.id.toString();
   const userRef = db.collection('users').doc(telegramId);
   const doc = await userRef.get();
 
   if (!doc.exists) {
+    const statsRef = db.collection('stats').doc('global');
+    const statsDoc = await statsRef.get();
+    const currentCount = statsDoc.exists ? (statsDoc.data().totalMembers || 0) : 0;
+    const newEntryNumber = currentCount + 1;
+
     const newUser = {
       telegramId,
       username: req.telegramUser.username || '',
@@ -95,7 +100,7 @@ app.post('/api/auth', validateTelegram, async (req, res) => {
       silentDays: 0,
       balance: 0,
       secretEcho: generateEcho(),
-      entryNumber: Math.floor(Math.random() * 1000) + 100,
+      entryNumber: newEntryNumber,
       lastStayAt: 0,
       wallMarks: [],
       hasMarkedToday: false,
@@ -200,7 +205,7 @@ app.get('/api/leaderboard', async (req, res) => {
   })));
 });
 
-// ============ LEDGER (now reads 1 doc) ============
+// ============ LEDGER ============
 app.get('/api/ledger', async (req, res) => {
   const doc = await db.collection('stats').doc('global').get();
   if (!doc.exists) return res.json({ totalDistributed: 0, totalMembers: 0, awaitingClaim: 0 });
@@ -214,14 +219,14 @@ app.get('/api/ledger', async (req, res) => {
 
 // ============ FIRST 100 ============
 app.get('/api/first100', async (req, res) => {
-  const snapshot = await db.collection('users').orderBy('createdAt', 'asc').limit(100).get();
+  const snapshot = await db.collection('users').orderBy('entryNumber', 'asc').limit(100).get();
   res.json(snapshot.docs.map(doc => ({
     secretEcho: doc.data().secretEcho,
     silentDays: doc.data().silentDays || 0,
   })));
 });
 
-// ============ WITNESS ============
+// ============ WITNESS (no reward here) ============
 app.post('/api/witness', validateTelegram, async (req, res) => {
   const reporterId = req.telegramUser.id.toString();
   const { link, violatorEcho, note } = req.body;
@@ -230,24 +235,16 @@ app.post('/api/witness', validateTelegram, async (req, res) => {
   await db.collection('witnesses').add({
     reporterId,
     link,
-    violatorEcho: violatorEcho || '',
-    note: note || '',
+    violatorEcho: (violatorEcho || '').trim().toUpperCase(),
+    note: (note || '').trim(),
     status: 'pending',
     createdAt: FieldValue.serverTimestamp(),
   });
 
-  await db.collection('users').doc(reporterId).update({
-    balance: FieldValue.increment(50),
-  });
-
-  await incrementStats({
-    totalDistributed: FieldValue.increment(50),
-    totalWitnesses: FieldValue.increment(1),
-  });
-
-  res.json({ success: true, reward: 50 });
+  res.json({ success: true });
 });
 
+// ============ DISAPPEARED ============
 app.get('/api/disappeared', async (req, res) => {
   const snapshot = await db.collection('witnesses').where('status', '==', 'valid').limit(50).get();
   res.json(snapshot.docs.map(doc => ({
@@ -257,7 +254,7 @@ app.get('/api/disappeared', async (req, res) => {
   })));
 });
 
-// ============ ADMIN: review witnesses ============
+// ============ ADMIN ============
 function requireAdmin(req, res, next) {
   const telegramId = req.telegramUser.id.toString();
   if (telegramId !== ADMIN_TELEGRAM_ID) {
@@ -275,11 +272,43 @@ app.get('/api/admin/witnesses', validateTelegram, requireAdmin, async (req, res)
   res.json(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
 });
 
+// ============ ADMIN REVIEW (reward here) ============
 app.post('/api/admin/witness/:id', validateTelegram, requireAdmin, async (req, res) => {
   const { id } = req.params;
-  const { status } = req.body; // 'valid' | 'fake'
-  if (!['valid', 'fake'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
-  await db.collection('witnesses').doc(id).update({ status });
+  const { status } = req.body;
+  if (!['valid', 'fake'].includes(status)) {
+    return res.status(400).json({ error: 'Invalid status' });
+  }
+
+  const witnessRef = db.collection('witnesses').doc(id);
+  const witness = await witnessRef.get();
+  if (!witness.exists) return res.status(404).json({ error: 'Witness not found' });
+
+  const data = witness.data();
+  await witnessRef.update({ status });
+
+  if (status === 'valid') {
+    // Reward the reporter
+    await db.collection('users').doc(data.reporterId).update({
+      balance: FieldValue.increment(50),
+    });
+    await incrementStats({
+      totalDistributed: FieldValue.increment(50),
+      totalWitnesses: FieldValue.increment(1),
+    });
+
+    // Penalize the violator if their Echo is known
+    if (data.violatorEcho) {
+      const violators = await db.collection('users')
+        .where('secretEcho', '==', data.violatorEcho)
+        .limit(1)
+        .get();
+      if (!violators.empty) {
+        await violators.docs[0].ref.update({ silentDays: 0 });
+      }
+    }
+  }
+
   res.json({ success: true });
 });
 

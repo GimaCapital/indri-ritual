@@ -1364,7 +1364,6 @@
 //   fontFamily: 'inherit',
 //   transition: 'border 0.3s ease',
 // };
-
 import { useEffect, useRef, useState } from 'react';
 
 import { EntryScreen } from './screens/EntryScreen';
@@ -1433,8 +1432,7 @@ export function IndexPage() {
   const watchingRef = useRef<number | null>(null);
   const sigilTapTimeoutRef = useRef<number | null>(null);
 
-  // Authenticate on mount
-    // Authenticate on mount — wait for Telegram initData to be ready
+  // Authenticate on mount — wait for Telegram initData to be ready
   useEffect(() => {
     const authenticate = async () => {
       // Wait up to 5 seconds for Telegram SDK to populate initData
@@ -1856,7 +1854,6 @@ export function IndexPage() {
       onStopStay={stopStay}
       onSigilTap={handleSigilTap}
       onSignal={handleSignal}
-      onClearCooldown={() => {}}
       onGoTo={(s) => setScreen(s as Screen)}
       onGoToAdmin={() => setScreen('admin')}
       walletAddress={user?.walletAddress || ''}

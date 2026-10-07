@@ -63,23 +63,6 @@ export function EntryScreen({ code, setCode, onSuccess }: Props) {
             {error}
           </p>
         )}
-        <button
-          onClick={() => { localStorage.clear(); window.location.reload(); }}
-          style={{
-            marginTop: '20px',
-            padding: '8px 16px',
-            fontSize: '9px',
-            letterSpacing: '2px',
-            textTransform: 'uppercase',
-            border: '1px solid #222222',
-            background: 'transparent',
-            color: '#333333',
-            cursor: 'pointer',
-            fontFamily: 'inherit',
-          }}
-        >
-          [test] reset all
-        </button>
       </div>
     </div>
   );

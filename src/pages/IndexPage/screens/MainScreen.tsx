@@ -27,7 +27,6 @@ interface Props {
   onStopStay: () => void;
   onSigilTap: () => void;
   onSignal: () => void;
-  onClearCooldown: () => void;
   onWalletLinked: (address: string) => void;
   onGoTo: (screen: string) => void;
   onGoToAdmin: () => void;
@@ -40,7 +39,7 @@ export function MainScreen(props: Props) {
     orderVoice, watchingMessage, flashNumber,
     isOnCooldown, cooldownRemaining, signalCooldown,
     walletAddress,
-    onStartStay, onStopStay, onSigilTap, onSignal, onClearCooldown,
+    onStartStay, onStopStay, onSigilTap, onSignal,
     onWalletLinked, onGoTo, onGoToAdmin,
   } = props;
 
@@ -56,26 +55,31 @@ export function MainScreen(props: Props) {
       paddingTop: '80px',
       paddingBottom: '60px',
     }}>
-      <div style={{ position: 'absolute', top: '28px', left: '28px', fontSize: '13px', color: '#ffffff', letterSpacing: '8px', textTransform: 'uppercase', fontWeight: 'bold', zIndex: 3 }}>
+      <div style={{ position: 'absolute', top: '24px', left: '24px', fontSize: '13px', color: '#ffffff', letterSpacing: '8px', textTransform: 'uppercase', fontWeight: 'bold', zIndex: 3 }}>
         INDRI
       </div>
 
-      <div style={{ position: 'absolute', top: '28px', right: '28px', textAlign: 'right', zIndex: 3 }}>
-        <p style={{ fontSize: '9px', color: '#555555', letterSpacing: '3px', margin: 0, textTransform: 'uppercase' }}>
-          {currentRank}
-        </p>
-        <p style={{ fontSize: '26px', color: '#ffffff', letterSpacing: '2px', margin: 0, fontWeight: 'bold', lineHeight: '1.2' }}>
-          {silentDays}
-        </p>
-        <p style={{ fontSize: '9px', color: '#555555', letterSpacing: '3px', margin: '14px 0 0 0', textTransform: 'uppercase' }}>
-          Share
-        </p>
-        <p style={{ fontSize: '18px', color: '#ffffff', letterSpacing: '2px', margin: 0, fontWeight: 'bold', lineHeight: '1.2' }}>
-          {balance} <span style={{ fontSize: '11px', color: '#777777' }}>$INDRI</span>
-        </p>
-        <p style={{ fontSize: '8px', color: '#444444', letterSpacing: '2px', margin: '4px 0 0 0', textTransform: 'uppercase' }}>
-          ×{currentMultiplier}
-        </p>
+      <div style={{ position: 'absolute', top: '24px', right: '24px', textAlign: 'right', zIndex: 3 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end', gap: '6px' }}>
+          <span style={{ fontSize: '9px', color: '#555555', letterSpacing: '3px', textTransform: 'uppercase' }}>
+            {currentRank}
+          </span>
+          <span style={{ fontSize: '22px', color: '#ffffff', letterSpacing: '1px', fontWeight: 'bold', lineHeight: 1 }}>
+            {silentDays}
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end', gap: '6px', marginTop: '6px' }}>
+          <span style={{ fontSize: '9px', color: '#555555', letterSpacing: '3px', textTransform: 'uppercase' }}>
+            Share
+          </span>
+          <span style={{ fontSize: '15px', color: '#ffffff', letterSpacing: '1px', fontWeight: 'bold', lineHeight: 1 }}>
+            {balance} <span style={{ fontSize: '10px', color: '#777777' }}>$INDRI</span>
+          </span>
+          <span style={{ fontSize: '8px', color: '#444444', letterSpacing: '1px', textTransform: 'uppercase' }}>
+            ×{currentMultiplier}
+          </span>
+        </div>
       </div>
 
       <OrderVoice voice={orderVoice} />
@@ -93,9 +97,6 @@ export function MainScreen(props: Props) {
             <p style={{ fontSize: '15px', color: '#ffffff', letterSpacing: '2px', margin: 0, fontWeight: 'bold' }}>
               {formatTimeRemaining(cooldownRemaining)}
             </p>
-            <button onClick={onClearCooldown} style={{ marginTop: '10px', padding: '6px 14px', fontSize: '9px', letterSpacing: '2px', textTransform: 'uppercase', border: '1px solid #222222', background: 'transparent', color: '#333333', cursor: 'pointer', fontFamily: 'inherit' }}>
-              [test] skip wait
-            </button>
           </>
         ) : isStaying ? (
           <p style={{ fontSize: '28px', color: '#ffffff', letterSpacing: '6px', fontWeight: 'bold', margin: 0 }}>{staySeconds}s</p>
@@ -153,7 +154,8 @@ export function MainScreen(props: Props) {
           color: signalCooldown ? '#333333' : '#666666',
           cursor: signalCooldown ? 'not-allowed' : 'pointer',
           fontFamily: 'inherit',
-          zIndex: 3,
+          position: 'relative',
+          zIndex: 10,
         }}
       >
         {signalCooldown ? 'Signal Sent' : 'Send Signal'}
@@ -178,26 +180,9 @@ export function MainScreen(props: Props) {
               <button onClick={() => onGoTo('first100')} style={smallButtonStyle}>First 100</button>
             </div>
             <button
-              onClick={() => { localStorage.clear(); window.location.reload(); }}
-              style={{
-                marginTop: '12px',
-                padding: '6px 12px',
-                fontSize: '9px',
-                letterSpacing: '2px',
-                textTransform: 'uppercase',
-                border: '1px solid #1a1a1a',
-                background: 'transparent',
-                color: '#2a2a2a',
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-              }}
-            >
-              [test] reset
-            </button>
-            <button
               onClick={onGoToAdmin}
               style={{
-                marginTop: '8px',
+                marginTop: '16px',
                 padding: '6px 12px',
                 fontSize: '9px',
                 letterSpacing: '2px',
