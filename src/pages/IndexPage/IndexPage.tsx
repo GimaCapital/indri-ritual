@@ -1434,8 +1434,25 @@ export function IndexPage() {
   const sigilTapTimeoutRef = useRef<number | null>(null);
 
   // Authenticate on mount
+    // Authenticate on mount — wait for Telegram initData to be ready
   useEffect(() => {
     const authenticate = async () => {
+      // Wait up to 5 seconds for Telegram SDK to populate initData
+      let attempts = 0;
+      while (attempts < 50) {
+        // @ts-ignore
+        if (window.Telegram?.WebApp?.initData) break;
+        await new Promise(r => setTimeout(r, 100));
+        attempts++;
+      }
+
+      // @ts-ignore
+      if (!window.Telegram?.WebApp?.initData) {
+        setError('Open this app inside Telegram to continue.');
+        setLoading(false);
+        return;
+      }
+
       try {
         const userData = await api.auth();
         setUser(userData);
@@ -1451,7 +1468,7 @@ export function IndexPage() {
         setLoading(false);
       }
     };
-    setTimeout(authenticate, 300);
+    authenticate();
   }, []);
 
   // Save screen to localStorage (session only)
