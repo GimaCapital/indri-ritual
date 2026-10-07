@@ -1,8 +1,30 @@
 const API_URL = 'https://indri-backend.onrender.com';
 
+/**
+ * Retrieves the raw initData string.
+ * 1. Tries window.Telegram.WebApp.initData (works on mobile).
+ * 2. Falls back to parsing window.location.hash for 'tgWebAppData' (works on Telegram Desktop/Web).
+ */
 function getInitData(): string {
+  // 1. Try the native Telegram object
   // @ts-ignore
-  return window.Telegram?.WebApp?.initData || '';
+  if (window.Telegram?.WebApp?.initData) {
+    // @ts-ignore
+    return window.Telegram.WebApp.initData;
+  }
+
+  // 2. Fallback: parse from URL hash (tgWebAppData)
+  // The hash is a string like: "#tgWebAppData=...&tgWebAppVersion=..."
+  const hash = window.location.hash.slice(1);
+  if (hash) {
+    const params = new URLSearchParams(hash);
+    const tgData = params.get('tgWebAppData');
+    if (tgData) {
+      return decodeURIComponent(tgData);
+    }
+  }
+
+  return '';
 }
 
 async function apiCall<T>(
