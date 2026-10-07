@@ -1,13 +1,39 @@
+import { useState } from 'react';
 import { buttonStyle, containerStyle, dimButtonStyle, inputStyle } from '../styles';
+import { api } from '@/api';
 
 interface Props {
   code: string;
   setCode: (v: string) => void;
-  onCodeSubmit: () => void;
-  onNoCode: () => void;
+  onSuccess: (wasInvited: boolean) => void;
 }
 
-export function EntryScreen({ code, setCode, onCodeSubmit, onNoCode }: Props) {
+export function EntryScreen({ code, setCode, onSuccess }: Props) {
+  const [error, setError] = useState('');
+  const [checking, setChecking] = useState(false);
+
+  const handleCodeSubmit = async () => {
+    if (code.trim().length === 0) return;
+    setChecking(true);
+    setError('');
+    try {
+      const result = await api.validateInvite(code);
+      if (result.valid) {
+        onSuccess(true);
+      } else {
+        setError('This code was not recognized.');
+      }
+    } catch (e) {
+      setError('The Order is silent. Try again.');
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const handleNoCode = () => {
+    onSuccess(false);
+  };
+
   return (
     <div style={containerStyle}>
       <img src="/indri.jpg" alt="" style={{ width: '180px', height: '140px', objectFit: 'contain' }} />
@@ -24,14 +50,21 @@ export function EntryScreen({ code, setCode, onCodeSubmit, onNoCode }: Props) {
           value={code}
           onChange={(e) => setCode(e.target.value.toUpperCase())}
           style={inputStyle}
+          disabled={checking}
         />
-        <button onClick={onCodeSubmit} style={buttonStyle}>Enter</button>
-        <button onClick={onNoCode} style={dimButtonStyle}>I was not told</button>
+        <button onClick={handleCodeSubmit} disabled={checking} style={buttonStyle}>
+          {checking ? 'Checking...' : 'Enter'}
+        </button>
+        <button onClick={handleNoCode} disabled={checking} style={dimButtonStyle}>
+          I was not told
+        </button>
+        {error && (
+          <p style={{ fontSize: '11px', color: '#ff5555', letterSpacing: '2px', textAlign: 'center', marginTop: '10px' }}>
+            {error}
+          </p>
+        )}
         <button
-          onClick={() => {
-            localStorage.clear();
-            window.location.reload();
-          }}
+          onClick={() => { localStorage.clear(); window.location.reload(); }}
           style={{
             marginTop: '20px',
             padding: '8px 16px',

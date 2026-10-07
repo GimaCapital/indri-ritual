@@ -1365,8 +1365,6 @@
 //   transition: 'border 0.3s ease',
 // };
 
-
-
 import { useEffect, useRef, useState } from 'react';
 
 import { EntryScreen } from './screens/EntryScreen';
@@ -1385,13 +1383,10 @@ import { First100Screen } from './screens/First100Screen';
 import { LetterScreen } from './screens/LetterScreen';
 import { ExitCountdownScreen } from './screens/ExitCountdownScreen';
 import { MainScreen } from './screens/MainScreen';
+import { AdminScreen } from './screens/AdminScreen';
 
-import { generateEcho } from './utils/echo';
-import {
-  COOLDOWN_MS,
-  ORDER_VOICES,
-  WATCHING_MESSAGES,
-} from './constants';
+import { api, type UserData } from '@/api';
+import { COOLDOWN_MS, ORDER_VOICES } from './constants';
 
 type Screen =
   | 'entry'
@@ -1408,27 +1403,23 @@ type Screen =
   | 'ledger'
   | 'wall'
   | 'first100'
-  | 'letter';
+  | 'letter'
+  | 'admin';
 
 export function IndexPage() {
   const [screen, setScreen] = useState<Screen>('entry');
+  const [user, setUser] = useState<UserData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [hasCode, setHasCode] = useState(false);
-  const [wasInvited, setWasInvited] = useState(false);
   const [code, setCode] = useState('');
-  const [secretEcho, setSecretEcho] = useState('');
-  const [entryNumber, setEntryNumber] = useState(0);
-  const [silentDays, setSilentDays] = useState(0);
-  const [balance, setBalance] = useState(0);
   const [isStaying, setIsStaying] = useState(false);
   const [staySeconds, setStaySeconds] = useState(0);
   const [rewardMessage, setRewardMessage] = useState('');
-  const [lastStayAt, setLastStayAt] = useState<number>(0);
   const [now, setNow] = useState<number>(Date.now());
   const [orderVoice, setOrderVoice] = useState(ORDER_VOICES[0]);
-  const [watchingMessage, setWatchingMessage] = useState(WATCHING_MESSAGES[0]);
+  const [watchingMessage, setWatchingMessage] = useState('They are watching');
   const [flashNumber, setFlashNumber] = useState<string | null>(null);
-  const [wallMarks, setWallMarks] = useState<number[]>([]);
-  const [hasMarkedToday, setHasMarkedToday] = useState(false);
   const [exitCountdown, setExitCountdown] = useState<number | null>(null);
   const [signalCooldown, setSignalCooldown] = useState(false);
   const [sigilTaps, setSigilTaps] = useState(0);
@@ -1442,38 +1433,42 @@ export function IndexPage() {
   const watchingRef = useRef<number | null>(null);
   const sigilTapTimeoutRef = useRef<number | null>(null);
 
-  // Load state on mount
+  // Authenticate on mount
   useEffect(() => {
-    const savedEcho = localStorage.getItem('indri_echo');
-    const savedVow = localStorage.getItem('indri_vow');
-    const savedDays = localStorage.getItem('indri_silent_days');
-    const savedEntry = localStorage.getItem('indri_entry_number');
-    const savedBalance = localStorage.getItem('indri_balance');
-    const savedLastStay = localStorage.getItem('indri_last_stay');
-    const savedInvited = localStorage.getItem('indri_was_invited');
-    const savedWall = localStorage.getItem('indri_wall_marks');
-    const savedMarkedToday = localStorage.getItem('indri_marked_today');
-
-    if (savedEcho && savedVow === 'true') {
-      setSecretEcho(savedEcho);
-      setSilentDays(savedDays ? parseInt(savedDays, 10) : 0);
-      setEntryNumber(savedEntry ? parseInt(savedEntry, 10) : 0);
-      setBalance(savedBalance ? parseInt(savedBalance, 10) : 0);
-      setLastStayAt(savedLastStay ? parseInt(savedLastStay, 10) : 0);
-      setWasInvited(savedInvited === 'true');
-      setWallMarks(savedWall ? JSON.parse(savedWall) : []);
-      setHasMarkedToday(savedMarkedToday === 'true');
-      setScreen('main');
-    }
+    const authenticate = async () => {
+      try {
+        const userData = await api.auth();
+        setUser(userData);
+        const savedScreen = localStorage.getItem('indri_screen');
+        if (userData.hasVowed && savedScreen && savedScreen !== 'entry') {
+          setScreen(savedScreen as Screen);
+        } else if (userData.hasVowed) {
+          setScreen('main');
+        }
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setLoading(false);
+      }
+    };
+    setTimeout(authenticate, 300);
   }, []);
+
+  // Save screen to localStorage (session only)
+  useEffect(() => {
+    if (screen !== 'entry') {
+      localStorage.setItem('indri_screen', screen);
+    }
+  }, [screen]);
 
   // Cooldown tick
   useEffect(() => {
     if (screen !== 'main') return;
-    if (now - lastStayAt >= COOLDOWN_MS) return;
+    if (!user) return;
+    if (now - user.lastStayAt >= COOLDOWN_MS) return;
     const tick = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(tick);
-  }, [screen, lastStayAt, now]);
+  }, [screen, user, now]);
 
   // Sync staying ref
   useEffect(() => {
@@ -1491,12 +1486,21 @@ export function IndexPage() {
     };
   }, [screen]);
 
-  // Watching messages rotation
+  // Watching messages from backend
   useEffect(() => {
     if (screen !== 'main') return;
-    watchingRef.current = window.setInterval(() => {
-      setWatchingMessage(WATCHING_MESSAGES[Math.floor(Math.random() * WATCHING_MESSAGES.length)]);
-    }, 5000);
+    const fetchActivity = async () => {
+      try {
+        const messages = await api.activity();
+        if (messages.length > 0) {
+          setWatchingMessage(messages[Math.floor(Math.random() * messages.length)]);
+        }
+      } catch (e) {
+        // silent
+      }
+    };
+    fetchActivity();
+    watchingRef.current = window.setInterval(fetchActivity, 15000);
     return () => {
       if (watchingRef.current) clearInterval(watchingRef.current);
     };
@@ -1519,19 +1523,10 @@ export function IndexPage() {
     return () => clearTimeout(timer);
   }, [exitCountdown]);
 
-  const handleCodeSubmit = () => {
-    if (code.trim().length > 0) {
-      setHasCode(true);
-      setWasInvited(true);
-      localStorage.setItem('indri_was_invited', 'true');
-      setScreen('message');
-    }
-  };
-
-  const handleNoCode = () => {
-    setHasCode(false);
-    setWasInvited(false);
-    localStorage.setItem('indri_was_invited', 'false');
+  // Entry success — called by EntryScreen after it validates the code
+  const handleEntrySuccess = (wasInvited: boolean) => {
+    setHasCode(wasInvited);
+    if (wasInvited && user) setUser({ ...user, wasInvited: true });
     setScreen('message');
   };
 
@@ -1544,19 +1539,21 @@ export function IndexPage() {
     setScreen('vow');
   };
 
-  const handleVow = (accepted: boolean) => {
-    if (accepted) setScreen('rule');
-    else setExitCountdown(4);
+  const handleVow = async (accepted: boolean) => {
+    if (accepted) {
+      try {
+        await api.vow();
+        if (user) setUser({ ...user, hasVowed: true });
+      } catch (e) {
+        // silent
+      }
+      setScreen('rule');
+    } else {
+      setExitCountdown(4);
+    }
   };
 
   const handleRuleDone = () => {
-    const newEcho = generateEcho();
-    const newEntry = Math.floor(Math.random() * 1000) + 100;
-    setSecretEcho(newEcho);
-    setEntryNumber(newEntry);
-    localStorage.setItem('indri_echo', newEcho);
-    localStorage.setItem('indri_entry_number', newEntry.toString());
-    localStorage.setItem('indri_vow', 'true');
     setScreen('echo');
   };
 
@@ -1570,45 +1567,25 @@ export function IndexPage() {
     setTimeout(() => setFlashNumber(null), 1000);
   };
 
-  const awardTokens = () => {
-    const multiplier = silentDays >= 90 ? 500 : silentDays >= 30 ? 250 : silentDays >= 7 ? 150 : 100;
-    const newBalance = balance + multiplier;
-    const newDays = silentDays + 1;
-    const newLastStay = Date.now();
-
-    setSilentDays(newDays);
-    setBalance(newBalance);
-    setLastStayAt(newLastStay);
-
-    localStorage.setItem('indri_silent_days', newDays.toString());
-    localStorage.setItem('indri_balance', newBalance.toString());
-    localStorage.setItem('indri_last_stay', newLastStay.toString());
-
+  const finishStay = async () => {
+    if (!user || hasEarnedRef.current) return;
     hasEarnedRef.current = true;
-
-    const milestones: Record<number, string> = {
-      7: 'You are now a Keeper. The silence deepens.',
-      30: 'You are now a Silent One. They have noticed.',
-      90: 'You are now Unseen. You were never here.',
-      365: 'One year. You are a myth now.',
-    };
-
-    if (milestones[newDays]) {
-      setRewardMessage(milestones[newDays]);
-      setTimeout(() => setRewardMessage(''), 5000);
-    } else {
-      setRewardMessage(`+${multiplier} $INDRI`);
+    try {
+      const updated = await api.stay();
+      setRewardMessage(`+${updated.balance - user.balance} $INDRI`);
+      setUser(updated);
       setTimeout(() => setRewardMessage(''), 3000);
-    }
-
-    if (Math.random() < 0.3) {
-      setTimeout(() => showFlashNumber(), 1500);
+      if (Math.random() < 0.3) setTimeout(() => showFlashNumber(), 1500);
+    } catch (e) {
+      setRewardMessage(String(e));
+      setTimeout(() => setRewardMessage(''), 3000);
     }
   };
 
   const startStay = () => {
     if (isStaying || holdTimeoutRef.current) return;
-    if (now - lastStayAt < COOLDOWN_MS) return;
+    if (!user) return;
+    if (now - user.lastStayAt < COOLDOWN_MS) return;
     hasEarnedRef.current = false;
 
     holdTimeoutRef.current = window.setTimeout(() => {
@@ -1623,7 +1600,7 @@ export function IndexPage() {
             if (intervalRef.current) clearInterval(intervalRef.current);
             intervalRef.current = null;
             setIsStaying(false);
-            if (!hasEarnedRef.current) awardTokens();
+            if (!hasEarnedRef.current) finishStay();
             return next;
           }
           return next;
@@ -1642,7 +1619,7 @@ export function IndexPage() {
       intervalRef.current = null;
     }
     if (isStaying && staySeconds >= 30 && !hasEarnedRef.current) {
-      awardTokens();
+      finishStay();
     } else if (isStaying && staySeconds < 30 && staySeconds > 0) {
       setRewardMessage('You left too soon.');
       setTimeout(() => setRewardMessage(''), 3000);
@@ -1669,12 +1646,6 @@ export function IndexPage() {
     };
   }, []);
 
-  const clearCooldown = () => {
-    setLastStayAt(0);
-    localStorage.removeItem('indri_last_stay');
-    setNow(Date.now());
-  };
-
   const handleSigilTap = () => {
     if (sigilTapTimeoutRef.current) clearTimeout(sigilTapTimeoutRef.current);
     const newTaps = sigilTaps + 1;
@@ -1687,36 +1658,61 @@ export function IndexPage() {
     sigilTapTimeoutRef.current = window.setTimeout(() => setSigilTaps(0), 2000);
   };
 
-  const handleSignal = () => {
-    if (signalCooldown) return;
-    const newBalance = balance + 10;
-    setBalance(newBalance);
-    localStorage.setItem('indri_balance', newBalance.toString());
-    setSignalCooldown(true);
-    setRewardMessage('Signal sent. +10 $INDRI');
-    setTimeout(() => {
-      setRewardMessage('');
-      setSignalCooldown(false);
-    }, 3000);
+  const handleSignal = async () => {
+    if (signalCooldown || !user) return;
+    try {
+      const result = await api.signal();
+      setUser({ ...user, balance: user.balance + result.reward });
+      setSignalCooldown(true);
+      setRewardMessage(`Signal sent. +${result.reward} $INDRI`);
+      setTimeout(() => {
+        setRewardMessage('');
+        setSignalCooldown(false);
+      }, 3000);
+    } catch (e) {
+      setRewardMessage(String(e));
+      setTimeout(() => setRewardMessage(''), 3000);
+    }
   };
 
-  const addWallMark = () => {
-    if (hasMarkedToday) return;
-    const newMarks = [...wallMarks, Date.now()];
-    setWallMarks(newMarks);
-    setHasMarkedToday(true);
-    localStorage.setItem('indri_wall_marks', JSON.stringify(newMarks));
-    localStorage.setItem('indri_marked_today', 'true');
+  const addWallMark = async () => {
+    if (!user || user.hasMarkedToday) return;
+    try {
+      await api.addTrace();
+      setUser({
+        ...user,
+        wallMarks: [...user.wallMarks, Date.now()],
+        hasMarkedToday: true,
+      });
+    } catch (e) {
+      setRewardMessage(String(e));
+      setTimeout(() => setRewardMessage(''), 3000);
+    }
   };
 
-  const resetWallMark = () => {
-    setHasMarkedToday(false);
-    localStorage.removeItem('indri_marked_today');
-  };
+  const resetWallMark = () => {};
 
   const eyesOpen = isStaying ? Math.min(staySeconds / 30, 1) : 0;
-  const cooldownRemaining = Math.max(0, COOLDOWN_MS - (now - lastStayAt));
+  const cooldownRemaining = user ? Math.max(0, COOLDOWN_MS - (now - user.lastStayAt)) : 0;
   const isOnCooldown = cooldownRemaining > 0;
+
+  // Loading and error states
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: '#050505', color: '#555555', fontFamily: 'monospace', letterSpacing: '4px' }}>
+        OPENING...
+      </div>
+    );
+  }
+
+  if (error && !user) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: '#050505', color: '#ffffff', fontFamily: 'monospace', padding: '24px', textAlign: 'center' }}>
+        <p style={{ letterSpacing: '4px', marginBottom: '20px' }}>THE ORDER IS SILENT</p>
+        <p style={{ fontSize: '11px', color: '#555555' }}>{error}</p>
+      </div>
+    );
+  }
 
   // SCREEN ROUTING
 
@@ -1729,8 +1725,7 @@ export function IndexPage() {
       <EntryScreen
         code={code}
         setCode={setCode}
-        onCodeSubmit={handleCodeSubmit}
-        onNoCode={handleNoCode}
+        onSuccess={handleEntrySuccess}
       />
     );
   }
@@ -1740,7 +1735,7 @@ export function IndexPage() {
   }
 
   if (screen === 'personal') {
-    return <PersonalScreen entryNumber={entryNumber} onDone={handlePersonalDone} />;
+    return <PersonalScreen entryNumber={user?.entryNumber || 0} onDone={handlePersonalDone} />;
   }
 
   if (screen === 'vow') {
@@ -1757,14 +1752,14 @@ export function IndexPage() {
   }
 
   if (screen === 'echo') {
-    return <EchoScreen secretEcho={secretEcho} onDone={handleEchoDone} />;
+    return <EchoScreen secretEcho={user?.secretEcho || ''} onDone={handleEchoDone} />;
   }
 
   if (screen === 'silent') {
     return (
       <SilentScreen
-        secretEcho={secretEcho}
-        silentDays={silentDays}
+        secretEcho={user?.secretEcho || ''}
+        silentDays={user?.silentDays || 0}
         onReturn={() => setScreen('main')}
       />
     );
@@ -1775,9 +1770,7 @@ export function IndexPage() {
       <WitnessScreen
         onReturn={() => setScreen('main')}
         onReward={(amount) => {
-          const newBalance = balance + amount;
-          setBalance(newBalance);
-          localStorage.setItem('indri_balance', newBalance.toString());
+          if (user) setUser({ ...user, balance: user.balance + amount });
         }}
       />
     );
@@ -1786,8 +1779,8 @@ export function IndexPage() {
   if (screen === 'invite') {
     return (
       <InviteScreen
-        wasInvited={wasInvited}
-        silentDays={silentDays}
+        wasInvited={user?.wasInvited || false}
+        silentDays={user?.silentDays || 0}
         onReturn={() => setScreen('main')}
       />
     );
@@ -1798,20 +1791,14 @@ export function IndexPage() {
   }
 
   if (screen === 'ledger') {
-    return (
-      <LedgerScreen
-        balance={balance}
-        silentDays={silentDays}
-        onReturn={() => setScreen('main')}
-      />
-    );
+    return <LedgerScreen onReturn={() => setScreen('main')} />;
   }
 
   if (screen === 'wall') {
     return (
       <WallScreen
-        wallMarks={wallMarks}
-        hasMarkedToday={hasMarkedToday}
+        wallMarks={user?.wallMarks || []}
+        hasMarkedToday={user?.hasMarkedToday || false}
         onAddMark={addWallMark}
         onResetMark={resetWallMark}
         onReturn={() => setScreen('main')}
@@ -1827,13 +1814,17 @@ export function IndexPage() {
     return <LetterScreen onReturn={() => setScreen('main')} />;
   }
 
+  if (screen === 'admin') {
+    return <AdminScreen onReturn={() => setScreen('main')} />;
+  }
+
   // MAIN
   return (
     <MainScreen
-      silentDays={silentDays}
-      balance={balance}
-      secretEcho={secretEcho}
-      entryNumber={entryNumber}
+      silentDays={user?.silentDays || 0}
+      balance={user?.balance || 0}
+      secretEcho={user?.secretEcho || ''}
+      entryNumber={user?.entryNumber || 0}
       isStaying={isStaying}
       staySeconds={staySeconds}
       eyesOpen={eyesOpen}
@@ -1848,8 +1839,13 @@ export function IndexPage() {
       onStopStay={stopStay}
       onSigilTap={handleSigilTap}
       onSignal={handleSignal}
-      onClearCooldown={clearCooldown}
+      onClearCooldown={() => {}}
       onGoTo={(s) => setScreen(s as Screen)}
+      onGoToAdmin={() => setScreen('admin')}
+      walletAddress={user?.walletAddress || ''}
+      onWalletLinked={(address) => {
+        if (user) setUser({ ...user, walletAddress: address });
+      }}
     />
   );
 }

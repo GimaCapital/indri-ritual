@@ -1,97 +1,45 @@
-import { openLink } from '@tma.js/sdk-react';
-import { TonConnectButton, useTonWallet } from '@tonconnect/ui-react';
-import {
-  Avatar,
-  Cell,
-  List,
-  Navigation,
-  Placeholder,
-  Section,
-  Text,
-  Title,
-} from '@telegram-apps/telegram-ui';
-import type { FC } from 'react';
+import { TonConnectButton, useTonAddress, useIsConnectionRestored } from '@tonconnect/ui-react';
+import { useEffect } from 'react';
+import { api } from '@/api';
 
-import { Page } from '@/components/Page.tsx';
+interface Props {
+  currentAddress: string;
+  onLinked: (address: string) => void;
+}
 
-import './TONConnectPage.css';
+export function WalletButton({ currentAddress, onLinked }: Props) {
+  const address = useTonAddress();
+  const restored = useIsConnectionRestored();
 
-export const TONConnectPage: FC = () => {
-  const wallet = useTonWallet();
+  useEffect(() => {
+    if (!restored || !address) return;
+    if (address === currentAddress) return;
+    api.linkWallet(address)
+      .then(() => onLinked(address))
+      .catch(() => {});
+  }, [address, restored, currentAddress, onLinked]);
 
-  if (!wallet) {
-    return (
-      <Page>
-        <Placeholder
-          header="TON Connect"
-          description={
-            <>
-              <Text>
-                To display the data related to the TON Connect, it is required to connect your
-                wallet
-              </Text>
-              <TonConnectButton />
-            </>
-          }
-        />
-      </Page>
-    );
-  }
-
-  const {
-    account: { chain, publicKey, address },
-    device: {
-      appName,
-      appVersion,
-      maxProtocolVersion,
-      platform,
-      features,
-    },
-  } = wallet;
+  if (!restored) return null;
 
   return (
-    <Page>
-      <List>
-        {'imageUrl' in wallet && (
-          <>
-            <Section>
-              <Cell
-                before={
-                  <Avatar src={wallet.imageUrl} alt="Provider logo" width={60} height={60}/>
-                }
-                after={<Navigation>About wallet</Navigation>}
-                subtitle={wallet.appName}
-                onClick={(e) => {
-                  e.preventDefault();
-                  openLink(wallet.aboutUrl);
-                }}
-              >
-                <Title level="3">{wallet.name}</Title>
-              </Cell>
-            </Section>
-            <TonConnectButton />
-          </>
-        )}
-
-        <Section header="Account">
-          <Cell subtitle="Address">{address}</Cell>
-          <Cell subtitle="Chain">{chain}</Cell>
-          <Cell subtitle="Public Key">{publicKey}</Cell>
-        </Section>
-
-        <Section header="Device">
-          <Cell subtitle="App Name">{appName}</Cell>
-          <Cell subtitle="App Version">{appVersion}</Cell>
-          <Cell subtitle="Max Protocol Version">{maxProtocolVersion}</Cell>
-          <Cell subtitle="Platform">{platform}</Cell>
-          <Cell subtitle="Features">
-            {features
-              .map(f => typeof f === 'object' ? f.name : undefined)
-              .filter(v => v)
-              .join(', ')}
-          </Cell>
-        </Section>
-      </List>
-    </Page>
+    <div style={{
+      marginTop: '16px',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      gap: '8px',
+      zIndex: 3,
+    }}>
+      <TonConnectButton />
+      {address && (
+        <p style={{
+          fontSize: '9px',
+          color: '#444444',
+          letterSpacing: '2px',
+        }}>
+          {address.slice(0, 6)}...{address.slice(-4)}
+        </p>
+      )}
+    </div>
   );
-};
+}

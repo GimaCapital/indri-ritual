@@ -2,6 +2,7 @@ import { Sigil } from '../components/Sigil';
 import { OrderVoice } from '../components/OrderVoice';
 import { WatchingPulse } from '../components/WatchingPulse';
 import { FlashNumber } from '../components/FlashNumber';
+import { WalletButton } from '@/pages/TONConnectPage/TONConnectPage';
 import { buttonStyle, containerStyle, smallButtonStyle } from '../styles';
 import { formatTimeRemaining } from '../utils/time';
 import { getMultiplier, getRank } from '../utils/rank';
@@ -21,12 +22,15 @@ interface Props {
   isOnCooldown: boolean;
   cooldownRemaining: number;
   signalCooldown: boolean;
+  walletAddress: string;
   onStartStay: () => void;
   onStopStay: () => void;
   onSigilTap: () => void;
   onSignal: () => void;
   onClearCooldown: () => void;
+  onWalletLinked: (address: string) => void;
   onGoTo: (screen: string) => void;
+  onGoToAdmin: () => void;
 }
 
 export function MainScreen(props: Props) {
@@ -35,7 +39,9 @@ export function MainScreen(props: Props) {
     isStaying, staySeconds, eyesOpen, rewardMessage,
     orderVoice, watchingMessage, flashNumber,
     isOnCooldown, cooldownRemaining, signalCooldown,
-    onStartStay, onStopStay, onSigilTap, onSignal, onClearCooldown, onGoTo,
+    walletAddress,
+    onStartStay, onStopStay, onSigilTap, onSignal, onClearCooldown,
+    onWalletLinked, onGoTo, onGoToAdmin,
   } = props;
 
   const currentRank = getRank(silentDays);
@@ -153,6 +159,8 @@ export function MainScreen(props: Props) {
         {signalCooldown ? 'Signal Sent' : 'Send Signal'}
       </button>
 
+      <WalletButton currentAddress={walletAddress} onLinked={onWalletLinked} />
+
       <div style={{ marginTop: '32px', minHeight: '120px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start', zIndex: 3 }}>
         {!isStaying && (
           <>
@@ -185,6 +193,23 @@ export function MainScreen(props: Props) {
               }}
             >
               [test] reset
+            </button>
+            <button
+              onClick={onGoToAdmin}
+              style={{
+                marginTop: '8px',
+                padding: '6px 12px',
+                fontSize: '9px',
+                letterSpacing: '2px',
+                textTransform: 'uppercase',
+                border: '1px solid #1a1a1a',
+                background: 'transparent',
+                color: '#2a2a2a',
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >
+              [admin]
             </button>
             <p style={{ marginTop: '20px', fontSize: '11px', color: '#555555', letterSpacing: '4px', textTransform: 'uppercase' }}>
               {secretEcho}

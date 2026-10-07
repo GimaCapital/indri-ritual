@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { buttonStyle, containerStyle, inputStyle, signatureStyle, textBlockStyle } from '../styles';
+import { api } from '@/api';
 
 interface Props {
   onReturn: () => void;
@@ -12,10 +13,15 @@ export function WitnessScreen({ onReturn, onReward }: Props) {
   const [note, setNote] = useState('');
   const [submitted, setSubmitted] = useState(false);
 
-  const submit = () => {
+  const submit = async () => {
     if (link.trim().length === 0) return;
-    onReward(50);
-    setSubmitted(true);
+    try {
+      const result = await api.witness(link, echo, note);
+      onReward(result.reward);
+      setSubmitted(true);
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   return (

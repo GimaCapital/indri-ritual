@@ -1,6 +1,7 @@
-import { buttonStyle, containerStyle, textBlockStyle } from '../styles';
-import { INVITE_GATE_DAYS } from '../constants';
 import { useState } from 'react';
+import { buttonStyle, containerStyle, signatureStyle, textBlockStyle } from '../styles';
+import { INVITE_GATE_DAYS } from '../constants';
+import { api } from '@/api';
 
 interface Props {
   wasInvited: boolean;
@@ -9,13 +10,19 @@ interface Props {
 }
 
 export function InviteScreen({ wasInvited, silentDays, onReturn }: Props) {
+  const [code, setCode] = useState('');
+  const [error, setError] = useState('');
+
   const organicGateOpen = wasInvited || silentDays >= INVITE_GATE_DAYS;
   const daysRemaining = Math.max(0, INVITE_GATE_DAYS - silentDays);
-  const [code, setCode] = useState('');
 
-  const generate = () => {
-    const newCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-    setCode(newCode);
+  const generate = async () => {
+    try {
+      const result = await api.invite();
+      setCode(result.code);
+    } catch (e) {
+      setError(String(e));
+    }
   };
 
   return (
@@ -40,6 +47,7 @@ export function InviteScreen({ wasInvited, silentDays, onReturn }: Props) {
                 <p style={{ color: '#ffffff', fontSize: '15px' }}>{daysRemaining} {daysRemaining === 1 ? 'day' : 'days'} remaining.</p>
               </>
             )}
+            {error && <p style={{ color: '#ff5555', fontSize: '11px' }}>{error}</p>}
           </div>
           {organicGateOpen && (
             <button onClick={generate} style={buttonStyle}>Generate Code</button>
