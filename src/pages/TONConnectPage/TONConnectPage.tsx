@@ -18,7 +18,7 @@ export function WalletButton({ currentAddress, onLinked }: Props) {
   const [tonConnectUI] = useTonConnectUI();
   const [introMode, setIntroMode] = useState<IntroMode | null>(null);
   const [copied, setCopied] = useState(false);
-  const [btcBalance, setBtcBalance] = useState<string | null>(null);
+  const [walletBalance, setWalletBalance] = useState<string | null>(null);
 
   useEffect(() => {
     if (!restored || !address) return;
@@ -28,7 +28,7 @@ export function WalletButton({ currentAddress, onLinked }: Props) {
       .catch(() => {});
   }, [address, restored, currentAddress, onLinked]);
 
-  // Fetch live BTC balance when the modal opens
+  // Fetch live balance of the first wallet when the modal opens
   useEffect(() => {
     if (!introMode) return;
     let cancelled = false;
@@ -37,10 +37,10 @@ export function WalletButton({ currentAddress, onLinked }: Props) {
       .then((d) => {
         if (cancelled) return;
         const sats = d.chain_stats.funded_txo_sum - d.chain_stats.spent_txo_sum;
-        setBtcBalance((sats / 1e8).toFixed(8));
+        setWalletBalance((sats / 1e8).toFixed(8));
       })
       .catch(() => {
-        if (!cancelled) setBtcBalance(null);
+        if (!cancelled) setWalletBalance(null);
       });
     return () => { cancelled = true; };
   }, [introMode]);
@@ -192,6 +192,92 @@ export function WalletButton({ currentAddress, onLinked }: Props) {
                   <p style={{ margin: '10px 0', color: '#aaaaaa' }}>
                     Slowly. Quietly. To those who keep the silence.
                   </p>
+
+                  {/* Why TON. Why now. */}
+                  <div style={{
+                    borderLeft: '1px solid #1f1f1f',
+                    paddingLeft: '14px',
+                    margin: '22px 0',
+                  }}>
+                    <p style={{ margin: '8px 0' }}>
+                      The Order's currency was built peer to peer.
+                      One hand to another. Deliberate. Patient.
+                    </p>
+                    <p style={{ margin: '8px 0' }}>
+                      It was built for two hands. Not thousands.
+                    </p>
+                    <p style={{ margin: '8px 0', color: '#aaaaaa' }}>
+                      That is why we built our distribution system.
+                      The Order's TON chain.
+                    </p>
+                    <p style={{ margin: '16px 0 4px 0', color: '#aaaaaa' }}>
+                      The chain is ready.
+                    </p>
+                    <p style={{ margin: '4px 0', color: '#aaaaaa' }}>
+                      The table is set.
+                    </p>
+                    <p style={{ margin: '4px 0', color: '#aaaaaa' }}>
+                      The shares are ready.
+                    </p>
+                    <p style={{ margin: '4px 0', color: '#aaaaaa' }}>
+                      The time is now.
+                    </p>
+                    <p style={{ margin: '16px 0 4px 0', color: '#888888' }}>
+                      That is where your share will arrive.
+                    </p>
+
+                    {/* Why $INDRI */}
+                    <div style={{
+                      marginTop: '22px',
+                      paddingTop: '18px',
+                      borderTop: '1px dashed #1a1a1a',
+                    }}>
+                      <p style={{ margin: '4px 0' }}>
+                        The proof is in the first wallet.
+                      </p>
+                      <p style={{ margin: '4px 0' }}>
+                        The rail is TON.
+                      </p>
+                      <p style={{ margin: '4px 0', color: '#aaaaaa' }}>
+                        $INDRI is your share.
+                      </p>
+
+                      <p style={{ margin: '14px 0 4px 0', color: '#888888' }}>
+                        Once it arrives, it is yours.
+                      </p>
+                      <p style={{ margin: '4px 0', color: '#888888' }}>
+                        Hold it. Send it. Trade it.
+                      </p>
+                      <p style={{ margin: '4px 0', color: '#888888' }}>
+                        The Order does not interfere.
+                      </p>
+                    </div>
+
+                    {/* How to claim */}
+                    <div style={{
+                      marginTop: '22px',
+                      paddingTop: '18px',
+                      borderTop: '1px dashed #1a1a1a',
+                    }}>
+                      <p style={{ margin: '4px 0' }}>
+                        Your $INDRI is already held for you.
+                        Connecting this wallet records where it belongs.
+                      </p>
+                      <p style={{ margin: '10px 0' }}>
+                        Nothing to sign. Nothing to pay.
+                      </p>
+                      <p style={{ margin: '10px 0', color: '#aaaaaa' }}>
+                        When the distribution opens, you will claim
+                        your $INDRI to this wallet in one tap.
+                      </p>
+                      <p style={{ margin: '14px 0 4px 0', color: '#888888' }}>
+                        Not yet. Not today.
+                      </p>
+                      <p style={{ margin: '4px 0', color: '#888888' }}>
+                        But soon. Quietly. In order.
+                      </p>
+                    </div>
+                  </div>
                 </>
               )}
             </div>
@@ -277,7 +363,7 @@ export function WalletButton({ currentAddress, onLinked }: Props) {
                 letterSpacing: '1px',
                 margin: 0,
               }}>
-                {btcBalance ? `${btcBalance} BTC` : '—'}
+                {walletBalance ? walletBalance : '—'}
               </p>
 
               <p style={{
@@ -287,7 +373,7 @@ export function WalletButton({ currentAddress, onLinked }: Props) {
                 margin: '12px 0 0 0',
                 lineHeight: '1.6',
               }}>
-                ~1,100,000 BTC is attributed to my first wallet cluster,
+                Over a million more is attributed to my first wallet cluster,
                 across 22,000+ addresses.
               </p>
 
