@@ -1,4 +1,4 @@
-import { buttonStyle, containerStyle, signatureStyle, textBlockStyle } from '../styles';
+import { buttonStyle, containerStyle, textBlockStyle } from '../styles';
 
 interface Props {
   secretEcho: string;

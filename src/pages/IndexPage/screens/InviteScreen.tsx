@@ -1,4 +1,4 @@
-import { buttonStyle, containerStyle, signatureStyle, textBlockStyle } from '../styles';
+import { buttonStyle, containerStyle, textBlockStyle } from '../styles';
 import { INVITE_GATE_DAYS } from '../constants';
 import { useState } from 'react';
 
