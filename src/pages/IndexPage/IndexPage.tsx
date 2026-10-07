@@ -1673,22 +1673,27 @@ export function IndexPage() {
     sigilTapTimeoutRef.current = window.setTimeout(() => setSigilTaps(0), 2000);
   };
 
-  const handleSignal = async () => {
-    if (signalCooldown || !user) return;
-    try {
-      const result = await api.signal();
-      setUser({ ...user, balance: user.balance + result.reward });
-      setSignalCooldown(true);
-      setRewardMessage(`Signal sent. +${result.reward} $INDRI`);
-      setTimeout(() => {
-        setRewardMessage('');
-        setSignalCooldown(false);
-      }, 3000);
-    } catch (e) {
-      setRewardMessage(String(e));
-      setTimeout(() => setRewardMessage(''), 3000);
+const handleSignal = async () => {
+  if (signalCooldown || !user) return;
+  try {
+    const result = await api.signal();
+    setUser({ ...user, balance: user.balance + result.reward });
+    setSignalCooldown(true);
+    setRewardMessage(`Signal sent. +${result.reward} $INDRI`);
+    setTimeout(() => {
+      setRewardMessage('');
+      setSignalCooldown(false);
+    }, 3000);
+  } catch (e) {
+    const msg = String(e);
+    if (msg.includes('No other members yet')) {
+      setRewardMessage('The silence is complete. No one to signal yet.');
+    } else {
+      setRewardMessage('The signal was lost.');
     }
-  };
+    setTimeout(() => setRewardMessage(''), 3000);
+  }
+};
 
   const addWallMark = async () => {
     if (!user || user.hasMarkedToday) return;
