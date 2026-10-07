@@ -8,7 +8,17 @@ interface Props {
 }
 
 const SATOSHI_ADDRESS = '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa';
-const SATOSHI_EXPLORER_URL = `https://mempool.space/address/${SATOSHI_ADDRESS}`;
+
+const EXPLORERS = [
+  {
+    name: 'mempool.space',
+    url: `https://mempool.space/address/${SATOSHI_ADDRESS}`,
+  },
+  {
+    name: 'bitmixlist.org',
+    url: `https://mempool.bitmixlist.org/address/${SATOSHI_ADDRESS}`,
+  },
+];
 
 type IntroMode = 'connect' | 'disconnect';
 
@@ -28,20 +38,42 @@ export function WalletButton({ currentAddress, onLinked }: Props) {
       .catch(() => {});
   }, [address, restored, currentAddress, onLinked]);
 
-  // Fetch live balance of the first wallet when the modal opens
+  // Fetch live balance of the first wallet when the modal opens.
+  // Tries the primary API first; falls back to the mirror on any failure.
   useEffect(() => {
     if (!introMode) return;
     let cancelled = false;
-    fetch(`https://mempool.space/api/address/${SATOSHI_ADDRESS}`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (cancelled) return;
-        const sats = d.chain_stats.funded_txo_sum - d.chain_stats.spent_txo_sum;
-        setWalletBalance((sats / 1e8).toFixed(8));
-      })
-      .catch(() => {
-        if (!cancelled) setWalletBalance(null);
-      });
+
+    const API_ENDPOINTS = [
+      `https://mempool.space/api/address/${SATOSHI_ADDRESS}`,
+      `https://mempool.bitmixlist.org/api/address/${SATOSHI_ADDRESS}`,
+    ];
+
+    const tryFetch = async () => {
+      for (const url of API_ENDPOINTS) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 5000);
+          const r = await fetch(url, { signal: controller.signal });
+          clearTimeout(timeoutId);
+
+          if (!r.ok) continue;
+          const d = await r.json();
+          if (cancelled) return;
+
+          const sats = d.chain_stats.funded_txo_sum - d.chain_stats.spent_txo_sum;
+          setWalletBalance((sats / 1e8).toFixed(8));
+          return;
+        } catch {
+          // try the next endpoint
+          continue;
+        }
+      }
+      // all endpoints failed
+      if (!cancelled) setWalletBalance(null);
+    };
+
+    tryFetch();
     return () => { cancelled = true; };
   }, [introMode]);
 
@@ -64,6 +96,19 @@ export function WalletButton({ currentAddress, onLinked }: Props) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {}
+  };
+
+  // Open external links reliably inside Telegram Mini Apps
+  const openLink = (url: string) => (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // @ts-ignore
+    if (window.Telegram?.WebApp?.openLink) {
+      // @ts-ignore
+      window.Telegram.WebApp.openLink(url);
+    } else {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
   };
 
   const isDisconnect = introMode === 'disconnect';
@@ -300,34 +345,29 @@ export function WalletButton({ currentAddress, onLinked }: Props) {
                 The Wallet I Never Touched
               </p>
 
-              <a
-                href={SATOSHI_EXPLORER_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{
-                  display: 'block',
-                  fontSize: '11px',
-                  color: '#777777',
-                  letterSpacing: '0.5px',
-                  wordBreak: 'break-all',
-                  textDecoration: 'none',
-                  marginBottom: '10px',
-                  lineHeight: '1.7',
-                  borderBottom: '1px dashed #1f1f1f',
-                  paddingBottom: '8px',
-                  transition: 'color 0.3s ease, border-color 0.3s ease',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.color = '#aaaaaa';
-                  e.currentTarget.style.borderBottomColor = '#333333';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.color = '#777777';
-                  e.currentTarget.style.borderBottomColor = '#1f1f1f';
-                }}
-              >
+              <p style={{
+                fontSize: '8px',
+                color: '#444444',
+                letterSpacing: '2px',
+                textTransform: 'uppercase',
+                margin: '0 0 8px 0',
+              }}>
+                Tap to view on-chain
+              </p>
+
+              <p style={{
+                fontSize: '11px',
+                color: '#777777',
+                letterSpacing: '0.5px',
+                wordBreak: 'break-all',
+                lineHeight: '1.7',
+                margin: 0,
+                marginBottom: '10px',
+                borderBottom: '1px dashed #1f1f1f',
+                paddingBottom: '8px',
+              }}>
                 {SATOSHI_ADDRESS}
-              </a>
+              </p>
 
               <button
                 onClick={copyAddress}
@@ -346,6 +386,37 @@ export function WalletButton({ currentAddress, onLinked }: Props) {
               >
                 {copied ? 'Copied' : 'Copy address'}
               </button>
+
+              {/* Explorer links */}
+              <div style={{
+                display: 'flex',
+                justifyContent: 'center',
+                gap: '14px',
+                marginTop: '10px',
+              }}>
+                {EXPLORERS.map((ex) => (
+                  <a
+                    key={ex.name}
+                    href={ex.url}
+                    onClick={openLink(ex.url)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      fontSize: '9px',
+                      color: '#555555',
+                      letterSpacing: '2px',
+                      textDecoration: 'none',
+                      borderBottom: '1px dashed #1f1f1f',
+                      paddingBottom: '2px',
+                      transition: 'color 0.3s ease',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = '#888888'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = '#555555'; }}
+                  >
+                    {ex.name}
+                  </a>
+                ))}
+              </div>
 
               <p style={{
                 fontSize: '9px',
@@ -394,16 +465,6 @@ export function WalletButton({ currentAddress, onLinked }: Props) {
                 margin: 0,
               }}>
                 January 3, 2009
-              </p>
-
-              <p style={{
-                fontSize: '8px',
-                color: '#333333',
-                letterSpacing: '2px',
-                margin: '14px 0 0 0',
-                textTransform: 'uppercase',
-              }}>
-                Tap to verify on-chain. I never lied.
               </p>
             </div>
 
