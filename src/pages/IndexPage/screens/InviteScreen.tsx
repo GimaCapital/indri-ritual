@@ -59,7 +59,7 @@ export function InviteScreen({ wasInvited, silentDays, onReturn }: Props) {
           <p style={{ fontSize: '36px', color: '#ffffff', letterSpacing: '10px', marginTop: '30px', fontWeight: 'bold' }}>{code}</p>
           <div style={{ ...textBlockStyle, marginTop: '50px', fontSize: '12px' }}>
             <p>Valid for 24 hours.<br />Send it to one person.<br />Tell them nothing else.</p>
-            <p style={{ color: '#555555' }}>They will know who sent it.</p>
+            <p style={signatureStyle}>They will know who sent it.</p>
           </div>
         </>
       )}
