@@ -38,7 +38,8 @@ function validateTelegram(req, res, next) {
   const initData = req.headers['x-telegram-init-data'];
   if (!initData) return res.status(401).json({ error: 'Missing initData' });
   try {
-    validate(initData, BOT_TOKEN);
+    // validate(initData, BOT_TOKEN);
+    validate(initData, BOT_TOKEN, { expiresIn: 7 * 24 * 60 * 60 * 1000 });
     const parsed = parse(initData);
     req.telegramUser = parsed.user;
     next();
