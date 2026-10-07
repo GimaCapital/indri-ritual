@@ -12,10 +12,17 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@google-cloud/firestore": "^9.3.1",
+    "@telegram-apps/init-data-node": "^2.0.10",
     "@telegram-apps/telegram-ui": "^2.1.9",
     "@tma.js/sdk-react": "^3.0.8",
     "@tonconnect/ui-react": "^2.2.0",
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.6",
     "eruda": "^3.4.3",
+    "express": "^5.2.1",
+    "firebase": "^12.19.0",
+    "firebase-admin": "^14.5.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.30.1"

@@ -12,13 +12,9 @@ import {
 } from '@telegram-apps/telegram-ui';
 import type { FC } from 'react';
 
-import { DisplayData } from '@/components/DisplayData/DisplayData.tsx';
 import { Page } from '@/components/Page.tsx';
-import { bem } from '@/css/bem.ts';
 
 import './TONConnectPage.css';
-
-const [, e] = bem('ton-connect-page');
 
 export const TONConnectPage: FC = () => {
   const wallet = useTonWallet();
@@ -27,7 +23,6 @@ export const TONConnectPage: FC = () => {
     return (
       <Page>
         <Placeholder
-          className={e('placeholder')}
           header="TON Connect"
           description={
             <>
@@ -35,7 +30,7 @@ export const TONConnectPage: FC = () => {
                 To display the data related to the TON Connect, it is required to connect your
                 wallet
               </Text>
-              <TonConnectButton className={e('button')}/>
+              <TonConnectButton />
             </>
           }
         />
@@ -74,33 +69,28 @@ export const TONConnectPage: FC = () => {
                 <Title level="3">{wallet.name}</Title>
               </Cell>
             </Section>
-            <TonConnectButton className={e('button-connected')}/>
+            <TonConnectButton />
           </>
         )}
-        <DisplayData
-          header="Account"
-          rows={[
-            { title: 'Address', value: address },
-            { title: 'Chain', value: chain },
-            { title: 'Public Key', value: publicKey },
-          ]}
-        />
-        <DisplayData
-          header="Device"
-          rows={[
-            { title: 'App Name', value: appName },
-            { title: 'App Version', value: appVersion },
-            { title: 'Max Protocol Version', value: maxProtocolVersion },
-            { title: 'Platform', value: platform },
-            {
-              title: 'Features',
-              value: features
-                .map(f => typeof f === 'object' ? f.name : undefined)
-                .filter(v => v)
-                .join(', '),
-            },
-          ]}
-        />
+
+        <Section header="Account">
+          <Cell subtitle="Address">{address}</Cell>
+          <Cell subtitle="Chain">{chain}</Cell>
+          <Cell subtitle="Public Key">{publicKey}</Cell>
+        </Section>
+
+        <Section header="Device">
+          <Cell subtitle="App Name">{appName}</Cell>
+          <Cell subtitle="App Version">{appVersion}</Cell>
+          <Cell subtitle="Max Protocol Version">{maxProtocolVersion}</Cell>
+          <Cell subtitle="Platform">{platform}</Cell>
+          <Cell subtitle="Features">
+            {features
+              .map(f => typeof f === 'object' ? f.name : undefined)
+              .filter(v => v)
+              .join(', ')}
+          </Cell>
+        </Section>
       </List>
     </Page>
   );
