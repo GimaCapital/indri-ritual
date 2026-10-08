@@ -6,7 +6,18 @@ interface Props {
 
 export function LetterScreen({ onReturn }: Props) {
   return (
-    <div style={containerStyle}>
+    <div
+      className="no-scrollbar"
+      style={{
+        ...containerStyle,
+        height: 'auto',
+        minHeight: '100vh',
+        justifyContent: 'flex-start',
+        overflowY: 'auto',
+        paddingTop: '60px',
+        paddingBottom: '60px',
+      }}
+    >
       <div style={{ ...textBlockStyle, maxWidth: '340px' }}>
         <p style={{ color: '#ffffff', fontSize: '14px', letterSpacing: '3px', marginBottom: '30px' }}>
           The Letter
@@ -26,7 +37,9 @@ export function LetterScreen({ onReturn }: Props) {
         </p>
         <p style={signatureStyle}>— The Order</p>
       </div>
-      <button onClick={onReturn} style={buttonStyle}>Return</button>
+      <button onClick={onReturn} style={{ ...buttonStyle, marginBottom: '20px' }}>
+        Return
+      </button>
     </div>
   );
 }

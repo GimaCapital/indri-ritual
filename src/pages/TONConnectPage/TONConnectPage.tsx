@@ -20,6 +20,8 @@ const EXPLORERS = [
   },
 ];
 
+const TAP_EXPLORER_URL = `https://mempool.bitmixlist.org/address/${SATOSHI_ADDRESS}`;
+
 type IntroMode = 'connect' | 'disconnect';
 
 export function WalletButton({ currentAddress, onLinked }: Props) {
@@ -39,37 +41,42 @@ export function WalletButton({ currentAddress, onLinked }: Props) {
   }, [address, restored, currentAddress, onLinked]);
 
   // Fetch live balance of the first wallet when the modal opens.
-  // Tries the primary API first; falls back to the mirror on any failure.
+  // Tries each API in order; first successful response wins.
   useEffect(() => {
     if (!introMode) return;
     let cancelled = false;
 
     const API_ENDPOINTS = [
-      `https://mempool.space/api/address/${SATOSHI_ADDRESS}`,
+      `https://blockstream.info/api/address/${SATOSHI_ADDRESS}`,
       `https://mempool.bitmixlist.org/api/address/${SATOSHI_ADDRESS}`,
+      `https://mempool.space/api/address/${SATOSHI_ADDRESS}`,
     ];
 
     const tryFetch = async () => {
       for (const url of API_ENDPOINTS) {
         try {
+          console.log('[balance] trying', url);
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 5000);
+          const timeoutId = setTimeout(() => controller.abort(), 10000);
           const r = await fetch(url, { signal: controller.signal });
           clearTimeout(timeoutId);
 
+          console.log('[balance] response', url, r.status);
           if (!r.ok) continue;
+
           const d = await r.json();
+          console.log('[balance] data', d);
           if (cancelled) return;
 
           const sats = d.chain_stats.funded_txo_sum - d.chain_stats.spent_txo_sum;
+          console.log('[balance] sats', sats);
           setWalletBalance((sats / 1e8).toFixed(8));
           return;
-        } catch {
-          // try the next endpoint
+        } catch (err) {
+          console.log('[balance] failed', url, err);
           continue;
         }
       }
-      // all endpoints failed
       if (!cancelled) setWalletBalance(null);
     };
 
@@ -345,29 +352,42 @@ export function WalletButton({ currentAddress, onLinked }: Props) {
                 The Wallet I Never Touched
               </p>
 
-              <p style={{
-                fontSize: '8px',
-                color: '#444444',
-                letterSpacing: '2px',
-                textTransform: 'uppercase',
-                margin: '0 0 8px 0',
-              }}>
-                Tap to view on-chain
-              </p>
-
-              <p style={{
-                fontSize: '11px',
-                color: '#777777',
-                letterSpacing: '0.5px',
-                wordBreak: 'break-all',
-                lineHeight: '1.7',
-                margin: 0,
-                marginBottom: '10px',
-                borderBottom: '1px dashed #1f1f1f',
-                paddingBottom: '8px',
-              }}>
-                {SATOSHI_ADDRESS}
-              </p>
+              <button
+                onClick={openLink(TAP_EXPLORER_URL)}
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  background: 'transparent',
+                  border: 'none',
+                  padding: 0,
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                  marginBottom: '10px',
+                }}
+              >
+                <span style={{
+                  display: 'block',
+                  fontSize: '8px',
+                  color: '#444444',
+                  letterSpacing: '2px',
+                  textTransform: 'uppercase',
+                  marginBottom: '8px',
+                }}>
+                  Tap to view on-chain
+                </span>
+                <span style={{
+                  display: 'block',
+                  fontSize: '11px',
+                  color: '#777777',
+                  letterSpacing: '0.5px',
+                  wordBreak: 'break-all',
+                  lineHeight: '1.7',
+                  borderBottom: '1px dashed #1f1f1f',
+                  paddingBottom: '8px',
+                }}>
+                  {SATOSHI_ADDRESS}
+                </span>
+              </button>
 
               <button
                 onClick={copyAddress}
