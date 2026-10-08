@@ -21,6 +21,7 @@ export function LedgerScreen({ onReturn }: Props) {
       <p style={{ fontSize: '11px', color: '#555555', letterSpacing: '2px', marginBottom: '40px', textAlign: 'center', maxWidth: '300px', lineHeight: '1.8' }}>
         What has been given.<br />What remains.
       </p>
+
       <div style={{ ...textBlockStyle, fontSize: '14px', lineHeight: '2.6' }}>
         <p style={{ color: '#888888' }}>Total Distributed</p>
         <p style={{ color: '#ffffff', fontSize: '22px', fontWeight: 'bold' }}>
@@ -35,6 +36,44 @@ export function LedgerScreen({ onReturn }: Props) {
           {(data?.awaitingClaim ?? 0).toLocaleString()} $INDRI
         </p>
       </div>
+
+      {/* Divider */}
+      <div style={{
+        height: '1px',
+        width: '100%',
+        maxWidth: '340px',
+        background: 'linear-gradient(to right, transparent, #1f1f1f, transparent)',
+        margin: '36px 0',
+      }} />
+
+      {/* Why TON. Why $INDRI. How to claim. */}
+      <div style={{
+        ...textBlockStyle,
+        fontSize: '12px',
+        lineHeight: '2',
+        textAlign: 'left',
+        borderLeft: '1px solid #1f1f1f',
+        paddingLeft: '14px',
+        marginBottom: '20px',
+      }}>
+        <p style={{ margin: '8px 0', color: '#888888' }}>
+          The Order's currency was built peer to peer.
+          One hand to another. Not thousands.
+        </p>
+        <p style={{ margin: '8px 0', color: '#aaaaaa' }}>
+          So we built the Order's TON chain.
+          The chain is ready. The table is set.
+          The shares are ready. The time is now.
+        </p>
+        <p style={{ margin: '16px 0 4px 0', color: '#888888' }}>
+          The proof is in the first wallet.
+        </p>
+        <p style={{ margin: '4px 0', color: '#aaaaaa' }}>
+          $INDRI is your share — held for you,
+          one tap to claim when the time comes.
+        </p>
+      </div>
+
       <button onClick={onReturn} style={buttonStyle}>Return</button>
     </div>
   );

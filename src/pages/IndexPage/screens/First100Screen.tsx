@@ -16,7 +16,7 @@ export function First100Screen({ onReturn }: Props) {
   return (
     <div style={containerStyle}>
       <p style={{ fontSize: '14px', color: '#ffffff', letterSpacing: '8px', textTransform: 'uppercase', marginBottom: '10px', fontWeight: 'bold' }}>
-        The First 100
+        The Block List
       </p>
       <p style={{ fontSize: '11px', color: '#555555', letterSpacing: '2px', marginBottom: '20px', textAlign: 'center', maxWidth: '300px', lineHeight: '1.8' }}>
         They entered before the world knew.<br />They are remembered.

@@ -177,7 +177,7 @@ export function MainScreen(props: Props) {
               <button onClick={() => onGoTo('wall')} style={smallButtonStyle}>Wall</button>
             </div>
             <div style={{ display: 'flex', gap: '10px', marginTop: '10px', flexWrap: 'wrap', justifyContent: 'center' }}>
-              <button onClick={() => onGoTo('first100')} style={smallButtonStyle}>First 100</button>
+              <button onClick={() => onGoTo('first100')} style={smallButtonStyle}>First List</button>
             </div>
             <button
               onClick={onGoToAdmin}
