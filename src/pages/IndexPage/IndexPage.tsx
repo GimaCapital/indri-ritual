@@ -1755,7 +1755,7 @@ const handleSignal = async () => {
   }
 
   if (screen === 'personal') {
-    return <PersonalScreen entryNumber={user?.entryNumber || 0} onDone={handlePersonalDone} />;
+    return <PersonalScreen entryNumber={user?.entryNumber || 0}  invitedBy={user?.invitedBy} onDone={handlePersonalDone} />;
   }
 
   if (screen === 'vow') {
@@ -1785,16 +1785,9 @@ const handleSignal = async () => {
     );
   }
 
-  if (screen === 'witness') {
-    return (
-      <WitnessScreen
-        onReturn={() => setScreen('main')}
-        onReward={(amount) => {
-          if (user) setUser({ ...user, balance: user.balance + amount });
-        }}
-      />
-    );
-  }
+ if (screen === 'witness') {
+  return <WitnessScreen onReturn={() => setScreen('main')} />;
+}
 
   if (screen === 'invite') {
     return (

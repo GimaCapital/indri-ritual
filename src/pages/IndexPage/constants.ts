@@ -12,4 +12,4 @@ export const ORDER_VOICES = [
 ];
 
 export const COOLDOWN_MS = 2 * 60 * 60 * 1000;
-export const INVITE_GATE_DAYS = 7;
+export const INVITE_GATE_DAYS = 1;

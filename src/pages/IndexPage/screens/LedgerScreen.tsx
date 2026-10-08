@@ -14,11 +14,22 @@ export function LedgerScreen({ onReturn }: Props) {
   }, []);
 
   return (
-    <div style={containerStyle}>
+    <div
+      className="no-scrollbar"
+      style={{
+        ...containerStyle,
+        height: 'auto',
+        minHeight: '100vh',
+        justifyContent: 'flex-start',
+        overflowY: 'auto',
+        paddingTop: '32px',
+        paddingBottom: '60px',
+      }}
+    >
       <p style={{ fontSize: '14px', color: '#ffffff', letterSpacing: '8px', textTransform: 'uppercase', marginBottom: '10px', fontWeight: 'bold' }}>
         The Ledger
       </p>
-      <p style={{ fontSize: '11px', color: '#555555', letterSpacing: '2px', marginBottom: '40px', textAlign: 'center', maxWidth: '300px', lineHeight: '1.8' }}>
+      <p style={{ fontSize: '11px', color: '#555555', letterSpacing: '2px', marginBottom: '28px', textAlign: 'center', maxWidth: '300px', lineHeight: '1.8' }}>
         What has been given.<br />What remains.
       </p>
 
@@ -43,7 +54,7 @@ export function LedgerScreen({ onReturn }: Props) {
         width: '100%',
         maxWidth: '340px',
         background: 'linear-gradient(to right, transparent, #1f1f1f, transparent)',
-        margin: '36px 0',
+        margin: '32px 0',
       }} />
 
       {/* Why TON. Why $INDRI. How to claim. */}
@@ -74,7 +85,9 @@ export function LedgerScreen({ onReturn }: Props) {
         </p>
       </div>
 
-      <button onClick={onReturn} style={buttonStyle}>Return</button>
+      <button onClick={onReturn} style={{ ...buttonStyle, marginBottom: '20px' }}>
+        Return
+      </button>
     </div>
   );
 }

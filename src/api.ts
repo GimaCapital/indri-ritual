@@ -14,7 +14,6 @@ function getInitData(): string {
   }
 
   // 2. Fallback: parse from URL hash (tgWebAppData)
-  // The hash is a string like: "#tgWebAppData=...&tgWebAppVersion=..."
   const hash = window.location.hash.slice(1);
   if (hash) {
     const params = new URLSearchParams(hash);
@@ -64,6 +63,7 @@ export interface UserData {
   wallMarks: number[];
   hasMarkedToday: boolean;
   wasInvited: boolean;
+  invitedBy?: string;
   hasVowed: boolean;
   hasInvitedToday: boolean;
   signalsReceived: number;
@@ -105,6 +105,8 @@ export interface AdminWitness {
 export const api = {
   validateInvite: (code: string) =>
     apiCall<{ valid: boolean }>('/api/validate-invite', 'POST', { code }),
+  redeemInvite: (code: string) =>
+    apiCall<{ success: boolean; invitedBy: string }>('/api/redeem-invite', 'POST', { code }),
   auth: () => apiCall<UserData>('/api/auth', 'POST'),
   vow: () => apiCall<{ success: boolean }>('/api/vow', 'POST'),
   stay: () => apiCall<UserData>('/api/stay', 'POST'),

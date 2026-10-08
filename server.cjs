@@ -21,9 +21,37 @@ initializeApp({
 const db = getFirestore();
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const ADMIN_TELEGRAM_ID = process.env.ADMIN_TELEGRAM_ID || '';
-const COOLDOWN_MS = 2 * 60 * 60 * 1000;
-const INVITE_GATE_DAYS = 7;
 
+// ============ CONFIG (all tunable values in one place) ============
+const CONFIG = {
+  COOLDOWN_MS: 2 * 60 * 60 * 1000,
+  INVITE_GATE_DAYS: 1,
+  INVITE_TTL_MS: 24 * 60 * 60 * 1000,
+};
+
+// ============ REWARDS (single source of truth) ============
+const REWARDS = {
+  stay: {
+    tier1: 500,
+    tier2: 2000,
+    tier3: 5000,
+    tier4: 7500,
+  },
+  signal: 300,
+  signalRecipient: 300,
+  witness: 500,
+  wallTrace: 0,
+  invite: 1000,
+};
+
+function getStayReward(days) {
+  if (days >= 60) return REWARDS.stay.tier4;
+  if (days >= 30) return REWARDS.stay.tier3;
+  if (days >= 7) return REWARDS.stay.tier2;
+  return REWARDS.stay.tier1;
+}
+
+// ============ HELPERS ============
 function generateEcho() {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
@@ -39,7 +67,6 @@ function validateTelegram(req, res, next) {
   if (!initData) return res.status(401).json({ error: 'Missing initData' });
   try {
     validate(initData, BOT_TOKEN);
-    // validate(initData, BOT_TOKEN, { expiresIn: 7 * 24 * 60 * 60 * 1000 });
     const parsed = parse(initData);
     req.telegramUser = parsed.user;
     next();
@@ -81,6 +108,52 @@ app.post('/api/validate-invite', async (req, res) => {
   res.json({ valid: true });
 });
 
+// ============ REDEEM INVITE ============
+app.post('/api/redeem-invite', validateTelegram, async (req, res) => {
+  const telegramId = req.telegramUser.id.toString();
+  const { code } = req.body;
+  if (!code) return res.status(400).json({ error: 'Missing code' });
+
+  const snapshot = await db.collection('invites')
+    .where('code', '==', code.toUpperCase())
+    .where('usedBy', '==', null)
+    .limit(1)
+    .get();
+
+  if (snapshot.empty) return res.status(400).json({ error: 'Invalid or used code' });
+
+  const inviteDoc = snapshot.docs[0];
+  const invite = inviteDoc.data();
+  const expiresAt = invite.expiresAt?.toDate?.();
+  if (expiresAt && expiresAt.getTime() < Date.now()) {
+    return res.status(400).json({ error: 'Code expired' });
+  }
+
+  // Mark code as used
+  await inviteDoc.ref.update({
+    usedBy: telegramId,
+    usedAt: FieldValue.serverTimestamp(),
+  });
+
+  // Mark the user as invited
+  await db.collection('users').doc(telegramId).update({
+    wasInvited: true,
+    invitedBy: invite.fromUserId,
+  });
+
+  // Reward the inviter — only when the code is actually used
+  if (REWARDS.invite > 0 && invite.fromUserId) {
+    await db.collection('users').doc(invite.fromUserId).update({
+      balance: FieldValue.increment(REWARDS.invite),
+    });
+    await incrementStats({
+      totalDistributed: FieldValue.increment(REWARDS.invite),
+    });
+  }
+
+  res.json({ success: true, invitedBy: invite.fromUserId });
+});
+
 // ============ AUTH (sequential entry numbers) ============
 app.post('/api/auth', validateTelegram, async (req, res) => {
   const telegramId = req.telegramUser.id.toString();
@@ -105,6 +178,7 @@ app.post('/api/auth', validateTelegram, async (req, res) => {
       wallMarks: [],
       hasMarkedToday: false,
       wasInvited: false,
+      invitedBy: '',
       hasVowed: false,
       hasInvitedToday: false,
       signalsReceived: 0,
@@ -141,13 +215,10 @@ app.post('/api/stay', validateTelegram, async (req, res) => {
       if (!doc.exists) throw new Error('User not found');
       const data = doc.data();
       const now = Date.now();
-      if (now - (data.lastStayAt || 0) < COOLDOWN_MS) throw new Error('Cooldown active');
+      if (now - (data.lastStayAt || 0) < CONFIG.COOLDOWN_MS) throw new Error('Cooldown active');
 
       const days = data.silentDays || 0;
-      let multiplier = 100;
-      if (days >= 90) multiplier = 500;
-      else if (days >= 30) multiplier = 250;
-      else if (days >= 7) multiplier = 150;
+      const multiplier = getStayReward(days);
 
       reward = multiplier;
       const newBalance = (data.balance || 0) + multiplier;
@@ -288,16 +359,14 @@ app.post('/api/admin/witness/:id', validateTelegram, requireAdmin, async (req, r
   await witnessRef.update({ status });
 
   if (status === 'valid') {
-    // Reward the reporter
     await db.collection('users').doc(data.reporterId).update({
-      balance: FieldValue.increment(50),
+      balance: FieldValue.increment(REWARDS.witness),
     });
     await incrementStats({
-      totalDistributed: FieldValue.increment(50),
+      totalDistributed: FieldValue.increment(REWARDS.witness),
       totalWitnesses: FieldValue.increment(1),
     });
 
-    // Penalize the violator if their Echo is known
     if (data.violatorEcho) {
       const violators = await db.collection('users')
         .where('secretEcho', '==', data.violatorEcho)
@@ -319,12 +388,12 @@ app.post('/api/invite', validateTelegram, async (req, res) => {
   const doc = await userRef.get();
   const data = doc.data();
 
-  const canInvite = data.wasInvited || (data.silentDays || 0) >= INVITE_GATE_DAYS;
+  const canInvite = data.wasInvited || (data.silentDays || 0) >= CONFIG.INVITE_GATE_DAYS;
   if (!canInvite) return res.status(400).json({ error: 'Not eligible to invite yet' });
   if (data.hasInvitedToday) return res.status(400).json({ error: 'Already invited today' });
 
   const code = generateCode();
-  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const expiresAt = new Date(Date.now() + CONFIG.INVITE_TTL_MS);
 
   await db.collection('invites').add({
     code,
@@ -335,6 +404,7 @@ app.post('/api/invite', validateTelegram, async (req, res) => {
   });
 
   await userRef.update({ hasInvitedToday: true });
+
   res.json({ code, expiresAt: expiresAt.toISOString() });
 });
 
@@ -356,14 +426,19 @@ app.post('/api/signal', validateTelegram, async (req, res) => {
     createdAt: FieldValue.serverTimestamp(),
   });
 
-  await senderRef.update({ balance: FieldValue.increment(10), signalsSent: FieldValue.increment(1) });
+  await senderRef.update({
+    balance: FieldValue.increment(REWARDS.signal),
+    signalsSent: FieldValue.increment(1),
+  });
   await db.collection('users').doc(recipientId).update({
-    balance: FieldValue.increment(10),
+    balance: FieldValue.increment(REWARDS.signalRecipient),
     signalsReceived: FieldValue.increment(1),
   });
 
-  await incrementStats({ totalDistributed: FieldValue.increment(20) });
-  res.json({ success: true, reward: 10 });
+  await incrementStats({
+    totalDistributed: FieldValue.increment(REWARDS.signal + REWARDS.signalRecipient),
+  });
+  res.json({ success: true, reward: REWARDS.signal });
 });
 
 // ============ ACTIVITY ============

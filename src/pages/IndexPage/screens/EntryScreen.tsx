@@ -17,12 +17,13 @@ export function EntryScreen({ code, setCode, onSuccess }: Props) {
     setChecking(true);
     setError('');
     try {
-      const result = await api.validateInvite(code);
-      if (result.valid) {
-        onSuccess(true);
-      } else {
+      const { valid } = await api.validateInvite(code);
+      if (!valid) {
         setError('This code was not recognized.');
+        return;
       }
+      await api.redeemInvite(code);
+      onSuccess(true);
     } catch (e) {
       setError('The Order is silent. Try again.');
     } finally {
@@ -35,8 +36,8 @@ export function EntryScreen({ code, setCode, onSuccess }: Props) {
   };
 
   return (
-    <div style={containerStyle}>
-      <img src="/indri.jpg" alt="" style={{ width: '180px', height: '140px', objectFit: 'contain' }} />
+    <div className="no-scrollbar" style={{ ...containerStyle, height: 'auto', minHeight: '100vh', justifyContent: 'center', overflowY: 'auto', paddingTop: '48px', paddingBottom: '60px' }}>
+      <img src="/indri.png" alt="" style={{ width: '180px', height: '140px', objectFit: 'contain' }} />
       <p style={{ marginTop: '40px', fontSize: '16px', color: '#ffffff', letterSpacing: '10px', textTransform: 'uppercase', fontWeight: 'bold' }}>
         INDRI
       </p>
