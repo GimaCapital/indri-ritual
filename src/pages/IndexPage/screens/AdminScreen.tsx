@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { buttonStyle, containerStyle, smallButtonStyle } from '../styles';
-import { api, type AdminWitness } from '@/api';
+import { api, friendlyError, type AdminWitness } from '@/api';
 
 interface Props {
   onReturn: () => void;
@@ -11,29 +11,31 @@ export function AdminScreen({ onReturn }: Props) {
   const [error, setError] = useState('');
 
   const load = () => {
+    setError('');
     api.adminWitnesses()
       .then(setWitnesses)
-      .catch(e => setError(String(e)));
+      .catch(e => setError(friendlyError(e)));
   };
 
   useEffect(() => { load(); }, []);
 
   const review = async (id: string, status: 'valid' | 'fake') => {
+    setError('');
     try {
       await api.adminReviewWitness(id, status);
       setWitnesses(prev => prev.filter(w => w.id !== id));
     } catch (e) {
-      setError(String(e));
+      setError(friendlyError(e));
     }
   };
 
   return (
-    <div style={containerStyle}>
+    <div className="no-scrollbar" style={{ ...containerStyle, height: 'auto', minHeight: '100vh', justifyContent: 'center', overflowY: 'auto', paddingTop: '48px', paddingBottom: '60px' }}>
       <p style={{ fontSize: '14px', color: '#ffffff', letterSpacing: '8px', textTransform: 'uppercase', marginBottom: '20px', fontWeight: 'bold' }}>
         Admin
       </p>
-      {error && <p style={{ color: '#ff5555', fontSize: '11px' }}>{error}</p>}
-      <div style={{ maxHeight: '60vh', overflowY: 'auto', width: '100%', maxWidth: '340px' }}>
+      {error && <p style={{ color: '#ff5555', fontSize: '11px', letterSpacing: '2px', marginBottom: '12px' }}>{error}</p>}
+      <div className="no-scrollbar" style={{ maxHeight: '60vh', overflowY: 'auto', width: '100%', maxWidth: '340px' }}>
         {witnesses.length === 0 ? (
           <p style={{ color: '#555555', fontSize: '12px', textAlign: 'center' }}>No pending witnesses.</p>
         ) : (
@@ -50,7 +52,7 @@ export function AdminScreen({ onReturn }: Props) {
           ))
         )}
       </div>
-      <button onClick={onReturn} style={buttonStyle}>Return</button>
+      <button onClick={onReturn} style={{ ...buttonStyle, marginBottom: '20px' }}>Return</button>
     </div>
   );
 }

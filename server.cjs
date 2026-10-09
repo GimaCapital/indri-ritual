@@ -22,14 +22,19 @@ const db = getFirestore();
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const ADMIN_TELEGRAM_ID = process.env.ADMIN_TELEGRAM_ID || '';
 
-// ============ CONFIG (all tunable values in one place) ============
+// ============ CONFIG ============
 const CONFIG = {
   COOLDOWN_MS: 2 * 60 * 60 * 1000,
   INVITE_GATE_DAYS: 1,
   INVITE_TTL_MS: 24 * 60 * 60 * 1000,
+
+  // Signal system
+  SIGNAL_LIVE_WINDOW_MS: 5 * 60 * 1000,     // how long a tap stays "live"
+  SIGNAL_DELAY_MS: 24 * 60 * 60 * 1000,      // queue hold before firing
+  SIGNAL_ORDER_WEEK_MS: 7 * 24 * 60 * 60 * 1000,
 };
 
-// ============ REWARDS (single source of truth) ============
+// ============ REWARDS ============
 const REWARDS = {
   stay: {
     tier1: 500,
@@ -37,8 +42,9 @@ const REWARDS = {
     tier3: 5000,
     tier4: 7500,
   },
-  signal: 300,
-  signalRecipient: 300,
+  signal: 300,               // sender reward
+  signalRecipient: 300,      // normal recipient reward
+  signalDisappeared: 500,    // recipient reward if disappeared (silentDays === 0)
   witness: 500,
   wallTrace: 0,
   invite: 1000,
@@ -85,11 +91,147 @@ async function incrementStats(fields) {
       awaitingClaim: 0,
       totalWitnesses: 0,
       totalTraces: 0,
+      orderPool: 0,
+      lastOrderDistributionAt: 0,
       ...fields,
     });
   } else {
     await ref.update(fields);
   }
+}
+
+// ============ SIGNAL SYSTEM (background tasks) ============
+
+// Move expired "live" taps into the 24h queue
+async function promoteLiveToQueue() {
+  const now = Date.now();
+  const expiredSnap = await db.collection('users')
+    .where('signalLiveUntil', '>', 0)
+    .where('signalLiveUntil', '<', now)
+    .limit(50)
+    .get();
+
+  for (const doc of expiredSnap.docs) {
+    const data = doc.data();
+    const queue = data.signalQueue || [];
+    queue.push({ queuedAt: data.signalLiveUntil });
+
+    await doc.ref.update({
+      signalLiveUntil: 0,
+      signalQueue: queue,
+      signalsQueued: FieldValue.increment(1),
+    });
+  }
+}
+
+// Fire queued signals older than SIGNAL_DELAY_MS
+async function fireQueuedSignals() {
+  const now = Date.now();
+  const usersSnap = await db.collection('users').limit(500).get();
+
+  for (const userDoc of usersSnap.docs) {
+    const data = userDoc.data();
+    const queue = data.signalQueue || [];
+    if (queue.length === 0) continue;
+
+    const ready = queue.filter(s => now - s.queuedAt >= CONFIG.SIGNAL_DELAY_MS);
+    const stillQueued = queue.filter(s => now - s.queuedAt < CONFIG.SIGNAL_DELAY_MS);
+    if (ready.length === 0) continue;
+
+    for (const _ of ready) {
+      await deliverSignal(userDoc.id);
+    }
+
+    await userDoc.ref.update({ signalQueue: stillQueued });
+  }
+}
+
+async function deliverSignal(senderId) {
+  const senderRef = db.collection('users').doc(senderId);
+
+  const allSnap = await db.collection('users').limit(500).get();
+  const others = allSnap.docs.filter(d => d.id !== senderId);
+
+  // Weighted pool: disappeared users appear 5× more often
+  const disappeared = others.filter(d => (d.data().silentDays || 0) === 0);
+  const pool = [];
+  for (let i = 0; i < 5; i++) pool.push(...disappeared);
+  pool.push(...others);
+
+  if (pool.length === 0) {
+    // Order fallback
+    await senderRef.update({ signalsToOrder: FieldValue.increment(1) });
+    await incrementStats({
+      orderPool: FieldValue.increment(REWARDS.signal),
+      totalDistributed: FieldValue.increment(REWARDS.signal),
+    });
+    return;
+  }
+
+  const recipient = pool[Math.floor(Math.random() * pool.length)];
+  const recipientData = recipient.data();
+  const isDisappeared = (recipientData.silentDays || 0) === 0;
+  const recipientReward = isDisappeared
+    ? REWARDS.signalDisappeared
+    : REWARDS.signalRecipient;
+
+  await senderRef.update({
+    signalsArrived: FieldValue.increment(1),
+    balance: FieldValue.increment(REWARDS.signal),
+  });
+
+  await db.collection('users').doc(recipient.id).update({
+    balance: FieldValue.increment(recipientReward),
+    signalsReceived: FieldValue.increment(1),
+  });
+
+  await db.collection('signals').add({
+    fromUserId: senderId,
+    toUserId: recipient.id,
+    traded: false,
+    disappeared: isDisappeared,
+    at: FieldValue.serverTimestamp(),
+  });
+
+  await incrementStats({
+    totalDistributed: FieldValue.increment(REWARDS.signal + recipientReward),
+  });
+
+  // Dot on the wall
+  await db.collection('wall').add({
+    telegramId: senderId,
+    date: new Date().toISOString().split('T')[0],
+    signal: true,
+    createdAt: FieldValue.serverTimestamp(),
+  });
+}
+
+// Distribute the Order pool weekly
+async function distributeOrderPool() {
+  const statsRef = db.collection('stats').doc('global');
+  const doc = await statsRef.get();
+  if (!doc.exists) return;
+
+  const data = doc.data();
+  const now = Date.now();
+  if ((data.lastOrderDistributionAt || 0) > now - CONFIG.SIGNAL_ORDER_WEEK_MS) return;
+  if ((data.orderPool || 0) <= 0) return;
+
+  const usersSnap = await db.collection('users').limit(500).get();
+  if (usersSnap.size === 0) return;
+
+  const perUser = Math.floor((data.orderPool || 0) / usersSnap.size);
+  if (perUser < 1) return;
+
+  const batch = db.batch();
+  usersSnap.forEach(userDoc => {
+    batch.update(userDoc.ref, { balance: FieldValue.increment(perUser) });
+  });
+  batch.update(statsRef, {
+    orderPool: 0,
+    lastOrderDistributionAt: now,
+  });
+  await batch.commit();
 }
 
 // ============ INVITE VALIDATION ============
@@ -129,19 +271,16 @@ app.post('/api/redeem-invite', validateTelegram, async (req, res) => {
     return res.status(400).json({ error: 'Code expired' });
   }
 
-  // Mark code as used
   await inviteDoc.ref.update({
     usedBy: telegramId,
     usedAt: FieldValue.serverTimestamp(),
   });
 
-  // Mark the user as invited
   await db.collection('users').doc(telegramId).update({
     wasInvited: true,
     invitedBy: invite.fromUserId,
   });
 
-  // Reward the inviter — only when the code is actually used
   if (REWARDS.invite > 0 && invite.fromUserId) {
     await db.collection('users').doc(invite.fromUserId).update({
       balance: FieldValue.increment(REWARDS.invite),
@@ -154,11 +293,13 @@ app.post('/api/redeem-invite', validateTelegram, async (req, res) => {
   res.json({ success: true, invitedBy: invite.fromUserId });
 });
 
-// ============ AUTH (sequential entry numbers) ============
+// ============ AUTH ============
 app.post('/api/auth', validateTelegram, async (req, res) => {
   const telegramId = req.telegramUser.id.toString();
   const userRef = db.collection('users').doc(telegramId);
   const doc = await userRef.get();
+
+  const isAdmin = telegramId === ADMIN_TELEGRAM_ID;
 
   if (!doc.exists) {
     const statsRef = db.collection('stats').doc('global');
@@ -183,15 +324,34 @@ app.post('/api/auth', validateTelegram, async (req, res) => {
       hasInvitedToday: false,
       signalsReceived: 0,
       signalsSent: 0,
+      // Signal system
+      signalLiveUntil: 0,
+      signalQueue: [],
+      lastSignalQueuedDate: '',
+      signalsQueued: 0,
+      signalsArrived: 0,
+      signalsTraded: 0,
+      signalsToOrder: 0,
       walletAddress: '',
       createdAt: FieldValue.serverTimestamp(),
     };
     await userRef.set(newUser);
     await incrementStats({ totalMembers: FieldValue.increment(1) });
-    return res.json({ ...newUser, createdAt: null });
+
+    // Fire background tasks
+    promoteLiveToQueue().catch(() => {});
+    fireQueuedSignals().catch(() => {});
+    distributeOrderPool().catch(() => {});
+
+    return res.json({ ...newUser, isAdmin, createdAt: null });
   }
 
-  res.json(doc.data());
+  // Fire background tasks
+  promoteLiveToQueue().catch(() => {});
+  fireQueuedSignals().catch(() => {});
+  distributeOrderPool().catch(() => {});
+
+  res.json({ ...doc.data(), isAdmin });
 });
 
 // ============ VOW ============
@@ -278,13 +438,20 @@ app.get('/api/leaderboard', async (req, res) => {
 
 // ============ LEDGER ============
 app.get('/api/ledger', async (req, res) => {
-  const doc = await db.collection('stats').doc('global').get();
-  if (!doc.exists) return res.json({ totalDistributed: 0, totalMembers: 0, awaitingClaim: 0 });
-  const data = doc.data();
+  const statsDoc = await db.collection('stats').doc('global').get();
+  const stats = statsDoc.exists ? statsDoc.data() : {};
+
+  // Sum all balances = what's held in-app, waiting to be claimed on-chain
+  const usersSnap = await db.collection('users').select('balance').get();
+  let awaitingClaim = 0;
+  usersSnap.forEach(doc => {
+    awaitingClaim += doc.data().balance || 0;
+  });
+
   res.json({
-    totalDistributed: data.totalDistributed || 0,
-    totalMembers: data.totalMembers || 0,
-    awaitingClaim: data.awaitingClaim || 0,
+    totalDistributed: stats.totalDistributed || 0,
+    totalMembers: stats.totalMembers || 0,
+    awaitingClaim,
   });
 });
 
@@ -297,7 +464,7 @@ app.get('/api/first100', async (req, res) => {
   })));
 });
 
-// ============ WITNESS (no reward here) ============
+// ============ WITNESS ============
 app.post('/api/witness', validateTelegram, async (req, res) => {
   const reporterId = req.telegramUser.id.toString();
   const { link, violatorEcho, note } = req.body;
@@ -343,7 +510,6 @@ app.get('/api/admin/witnesses', validateTelegram, requireAdmin, async (req, res)
   res.json(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
 });
 
-// ============ ADMIN REVIEW (reward here) ============
 app.post('/api/admin/witness/:id', validateTelegram, requireAdmin, async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
@@ -390,8 +556,34 @@ app.post('/api/invite', validateTelegram, async (req, res) => {
 
   const canInvite = data.wasInvited || (data.silentDays || 0) >= CONFIG.INVITE_GATE_DAYS;
   if (!canInvite) return res.status(400).json({ error: 'Not eligible to invite yet' });
-  if (data.hasInvitedToday) return res.status(400).json({ error: 'Already invited today' });
 
+  // Check for an existing active code
+  const existing = await db.collection('invites')
+    .where('fromUserId', '==', telegramId)
+    .where('usedBy', '==', null)
+    .orderBy('createdAt', 'desc')
+    .limit(1)
+    .get();
+
+  if (!existing.empty) {
+    const invite = existing.docs[0].data();
+    const expiresAt = invite.expiresAt?.toDate?.();
+    if (expiresAt && expiresAt.getTime() > Date.now()) {
+      // Still valid and unused — return the same code
+      return res.json({
+        code: invite.code,
+        expiresAt: expiresAt.toISOString(),
+        reused: true,
+      });
+    }
+  }
+
+  // If they've already generated a code today (that was used or expired)
+  if (data.hasInvitedToday) {
+    return res.status(400).json({ error: 'Already invited today' });
+  }
+
+  // Generate a fresh code
   const code = generateCode();
   const expiresAt = new Date(Date.now() + CONFIG.INVITE_TTL_MS);
 
@@ -404,41 +596,84 @@ app.post('/api/invite', validateTelegram, async (req, res) => {
   });
 
   await userRef.update({ hasInvitedToday: true });
-
   res.json({ code, expiresAt: expiresAt.toISOString() });
 });
 
-// ============ SIGNAL ============
-app.post('/api/signal', validateTelegram, async (req, res) => {
+// ============ SIGNAL — TAP ============
+app.post('/api/signal/tap', validateTelegram, async (req, res) => {
   const senderId = req.telegramUser.id.toString();
   const senderRef = db.collection('users').doc(senderId);
 
-  const usersSnapshot = await db.collection('users').limit(100).get();
-  const candidates = usersSnapshot.docs.filter(d => d.id !== senderId);
-  if (candidates.length === 0) return res.status(400).json({ error: 'No other members yet' });
+  let result = { outcome: 'none' };
 
-  const recipient = candidates[Math.floor(Math.random() * candidates.length)];
-  const recipientId = recipient.id;
+  try {
+    await db.runTransaction(async (t) => {
+      const senderDoc = await t.get(senderRef);
+      if (!senderDoc.exists) throw new Error('User not found');
+      const sender = senderDoc.data();
 
-  await db.collection('signals').add({
-    fromUserId: senderId,
-    toUserId: recipientId,
-    createdAt: FieldValue.serverTimestamp(),
-  });
+      // Daily limit
+      const today = new Date().toISOString().split('T')[0];
+      if (sender.lastSignalQueuedDate === today) {
+        throw new Error('One signal per day');
+      }
 
-  await senderRef.update({
-    balance: FieldValue.increment(REWARDS.signal),
-    signalsSent: FieldValue.increment(1),
-  });
-  await db.collection('users').doc(recipientId).update({
-    balance: FieldValue.increment(REWARDS.signalRecipient),
-    signalsReceived: FieldValue.increment(1),
-  });
+      const now = Date.now();
 
-  await incrementStats({
-    totalDistributed: FieldValue.increment(REWARDS.signal + REWARDS.signalRecipient),
-  });
-  res.json({ success: true, reward: REWARDS.signal });
+      // Look for a live partner
+      const liveSnap = await db.collection('users')
+        .where('signalLiveUntil', '>', now)
+        .limit(20)
+        .get();
+
+      const liveOthers = liveSnap.docs.filter(d => d.id !== senderId);
+
+      if (liveOthers.length > 0) {
+        // BLIND TRADE
+        const partner = liveOthers[Math.floor(Math.random() * liveOthers.length)];
+
+        t.update(senderRef, {
+          signalLiveUntil: 0,
+          lastSignalQueuedDate: today,
+          signalsTraded: FieldValue.increment(1),
+          balance: FieldValue.increment(REWARDS.signal),
+        });
+        t.update(partner.ref, {
+          signalLiveUntil: 0,
+          signalsTraded: FieldValue.increment(1),
+          balance: FieldValue.increment(REWARDS.signal),
+        });
+
+        t.set(db.collection('signals').doc(), {
+          fromUserId: senderId,
+          toUserId: partner.id,
+          traded: true,
+          at: FieldValue.serverTimestamp(),
+        });
+
+        result = { outcome: 'traded' };
+        return;
+      }
+
+      // No partner — go live
+      t.update(senderRef, {
+        signalLiveUntil: now + CONFIG.SIGNAL_LIVE_WINDOW_MS,
+        lastSignalQueuedDate: today,
+      });
+
+      result = { outcome: 'live' };
+    });
+  } catch (e) {
+    return res.status(400).json({ error: e.message });
+  }
+
+  if (result.outcome === 'traded') {
+    await incrementStats({
+      totalDistributed: FieldValue.increment(REWARDS.signal * 2),
+    });
+  }
+
+  res.json(result);
 });
 
 // ============ ACTIVITY ============

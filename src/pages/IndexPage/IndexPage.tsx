@@ -1364,6 +1364,10 @@
 //   fontFamily: 'inherit',
 //   transition: 'border 0.3s ease',
 // };
+
+
+
+
 import { useEffect, useRef, useState } from 'react';
 
 import { EntryScreen } from './screens/EntryScreen';
@@ -1384,7 +1388,7 @@ import { ExitCountdownScreen } from './screens/ExitCountdownScreen';
 import { MainScreen } from './screens/MainScreen';
 import { AdminScreen } from './screens/AdminScreen';
 
-import { api, type UserData } from '@/api';
+import { api, friendlyError, type UserData } from '@/api';
 import { COOLDOWN_MS, ORDER_VOICES } from './constants';
 
 type Screen =
@@ -1435,7 +1439,6 @@ export function IndexPage() {
   // Authenticate on mount — wait for Telegram initData to be ready
   useEffect(() => {
     const authenticate = async () => {
-      // Wait up to 5 seconds for Telegram SDK to populate initData
       let attempts = 0;
       while (attempts < 50) {
         // @ts-ignore
@@ -1461,7 +1464,7 @@ export function IndexPage() {
           setScreen('main');
         }
       } catch (e) {
-        setError(String(e));
+        setError(friendlyError(e));
       } finally {
         setLoading(false);
       }
@@ -1469,7 +1472,7 @@ export function IndexPage() {
     authenticate();
   }, []);
 
-  // Save screen to localStorage (session only)
+  // Save screen to localStorage
   useEffect(() => {
     if (screen !== 'entry') {
       localStorage.setItem('indri_screen', screen);
@@ -1501,7 +1504,7 @@ export function IndexPage() {
     };
   }, [screen]);
 
-  // Watching messages from backend
+  // Watching messages
   useEffect(() => {
     if (screen !== 'main') return;
     const fetchActivity = async () => {
@@ -1538,7 +1541,6 @@ export function IndexPage() {
     return () => clearTimeout(timer);
   }, [exitCountdown]);
 
-  // Entry success — called by EntryScreen after it validates the code
   const handleEntrySuccess = (wasInvited: boolean) => {
     setHasCode(wasInvited);
     if (wasInvited && user) setUser({ ...user, wasInvited: true });
@@ -1592,7 +1594,7 @@ export function IndexPage() {
       setTimeout(() => setRewardMessage(''), 3000);
       if (Math.random() < 0.3) setTimeout(() => showFlashNumber(), 1500);
     } catch (e) {
-      setRewardMessage(String(e));
+      setRewardMessage(friendlyError(e));
       setTimeout(() => setRewardMessage(''), 3000);
     }
   };
@@ -1673,27 +1675,33 @@ export function IndexPage() {
     sigilTapTimeoutRef.current = window.setTimeout(() => setSigilTaps(0), 2000);
   };
 
-const handleSignal = async () => {
-  if (signalCooldown || !user) return;
-  try {
-    const result = await api.signal();
-    setUser({ ...user, balance: user.balance + result.reward });
+  const handleSignal = async () => {
+    if (signalCooldown || !user) return;
     setSignalCooldown(true);
-    setRewardMessage(`Signal sent. +${result.reward} $INDRI`);
-    setTimeout(() => {
-      setRewardMessage('');
-      setSignalCooldown(false);
-    }, 3000);
-  } catch (e) {
-    const msg = String(e);
-    if (msg.includes('No other members yet')) {
-      setRewardMessage('The silence is complete. No one to signal yet.');
-    } else {
-      setRewardMessage('The signal was lost.');
+    try {
+      const result = await api.signalTap();
+
+      if (result.outcome === 'traded') {
+        setUser({ ...user, balance: user.balance + 300 });
+        setRewardMessage('Two hands reached out at the same moment.');
+      } else if (result.outcome === 'live') {
+        setRewardMessage('Your signal goes into the dark. It will find someone.');
+      } else {
+        setRewardMessage('Signal sent.');
+      }
+
+      setTimeout(() => {
+        setRewardMessage('');
+        setSignalCooldown(false);
+      }, 4000);
+    } catch (e) {
+      setRewardMessage(friendlyError(e));
+      setTimeout(() => {
+        setRewardMessage('');
+        setSignalCooldown(false);
+      }, 3000);
     }
-    setTimeout(() => setRewardMessage(''), 3000);
-  }
-};
+  };
 
   const addWallMark = async () => {
     if (!user || user.hasMarkedToday) return;
@@ -1705,7 +1713,7 @@ const handleSignal = async () => {
         hasMarkedToday: true,
       });
     } catch (e) {
-      setRewardMessage(String(e));
+      setRewardMessage(friendlyError(e));
       setTimeout(() => setRewardMessage(''), 3000);
     }
   };
@@ -1716,7 +1724,6 @@ const handleSignal = async () => {
   const cooldownRemaining = user ? Math.max(0, COOLDOWN_MS - (now - user.lastStayAt)) : 0;
   const isOnCooldown = cooldownRemaining > 0;
 
-  // Loading and error states
   if (loading) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: '#050505', color: '#555555', fontFamily: 'monospace', letterSpacing: '4px' }}>
@@ -1733,8 +1740,6 @@ const handleSignal = async () => {
       </div>
     );
   }
-
-  // SCREEN ROUTING
 
   if (exitCountdown !== null) {
     return <ExitCountdownScreen countdown={exitCountdown} />;
@@ -1755,7 +1760,13 @@ const handleSignal = async () => {
   }
 
   if (screen === 'personal') {
-    return <PersonalScreen entryNumber={user?.entryNumber || 0}  invitedBy={user?.invitedBy} onDone={handlePersonalDone} />;
+    return (
+      <PersonalScreen
+        entryNumber={user?.entryNumber || 0}
+        invitedBy={user?.invitedBy}
+        onDone={handlePersonalDone}
+      />
+    );
   }
 
   if (screen === 'vow') {
@@ -1785,9 +1796,9 @@ const handleSignal = async () => {
     );
   }
 
- if (screen === 'witness') {
-  return <WitnessScreen onReturn={() => setScreen('main')} />;
-}
+  if (screen === 'witness') {
+    return <WitnessScreen onReturn={() => setScreen('main')} />;
+  }
 
   if (screen === 'invite') {
     return (
@@ -1810,7 +1821,6 @@ const handleSignal = async () => {
   if (screen === 'wall') {
     return (
       <WallScreen
-        wallMarks={user?.wallMarks || []}
         hasMarkedToday={user?.hasMarkedToday || false}
         onAddMark={addWallMark}
         onResetMark={resetWallMark}
@@ -1831,7 +1841,6 @@ const handleSignal = async () => {
     return <AdminScreen onReturn={() => setScreen('main')} />;
   }
 
-  // MAIN
   return (
     <MainScreen
       silentDays={user?.silentDays || 0}
@@ -1853,6 +1862,7 @@ const handleSignal = async () => {
       onSigilTap={handleSigilTap}
       onSignal={handleSignal}
       onGoTo={(s) => setScreen(s as Screen)}
+      isAdmin={user?.isAdmin || false}
       onGoToAdmin={() => setScreen('admin')}
       walletAddress={user?.walletAddress || ''}
       onWalletLinked={(address) => {

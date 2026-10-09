@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { buttonStyle, containerStyle, inputStyle, signatureStyle, textBlockStyle } from '../styles';
-import { api } from '@/api';
+import { api, friendlyError } from '@/api';
 
 interface Props {
   onReturn: () => void;
@@ -20,7 +20,7 @@ export function WitnessScreen({ onReturn }: Props) {
       await api.witness(link, echo, note);
       setSubmitted(true);
     } catch (e) {
-      setError('The witness could not be recorded. Try again.');
+      setError(friendlyError(e));
     }
   };
 

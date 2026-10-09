@@ -34,17 +34,22 @@ export function LedgerScreen({ onReturn }: Props) {
       </p>
 
       <div style={{ ...textBlockStyle, fontSize: '14px', lineHeight: '2.6' }}>
-        <p style={{ color: '#888888' }}>Total Distributed</p>
+        {/* What has been given */}
+        <p style={{ color: '#888888' }}>What has been given</p>
         <p style={{ color: '#ffffff', fontSize: '22px', fontWeight: 'bold' }}>
           {(data?.totalDistributed ?? 0).toLocaleString()} $INDRI
         </p>
-        <p style={{ color: '#888888', marginTop: '20px' }}>Total Members</p>
-        <p style={{ color: '#ffffff', fontSize: '22px', fontWeight: 'bold' }}>
-          {(data?.totalMembers ?? 0).toLocaleString()}
-        </p>
-        <p style={{ color: '#888888', marginTop: '20px' }}>Awaiting Claim</p>
+
+        {/* What remains — waiting to be claimed on-chain */}
+        <p style={{ color: '#888888', marginTop: '20px' }}>Onchain Awaiting Claim</p>
         <p style={{ color: '#ffffff', fontSize: '22px', fontWeight: 'bold' }}>
           {(data?.awaitingClaim ?? 0).toLocaleString()} $INDRI
+        </p>
+
+        {/* Supporting context */}
+        <p style={{ color: '#888888', marginTop: '20px' }}>Members</p>
+        <p style={{ color: '#ffffff', fontSize: '22px', fontWeight: 'bold' }}>
+          {(data?.totalMembers ?? 0).toLocaleString()}
         </p>
       </div>
 

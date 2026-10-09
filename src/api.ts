@@ -1,28 +1,17 @@
 const API_URL = 'https://indri-backend.onrender.com';
 
-/**
- * Retrieves the raw initData string.
- * 1. Tries window.Telegram.WebApp.initData (works on mobile).
- * 2. Falls back to parsing window.location.hash for 'tgWebAppData' (works on Telegram Desktop/Web).
- */
 function getInitData(): string {
-  // 1. Try the native Telegram object
   // @ts-ignore
   if (window.Telegram?.WebApp?.initData) {
     // @ts-ignore
     return window.Telegram.WebApp.initData;
   }
-
-  // 2. Fallback: parse from URL hash (tgWebAppData)
   const hash = window.location.hash.slice(1);
   if (hash) {
     const params = new URLSearchParams(hash);
     const tgData = params.get('tgWebAppData');
-    if (tgData) {
-      return decodeURIComponent(tgData);
-    }
+    if (tgData) return decodeURIComponent(tgData);
   }
-
   return '';
 }
 
@@ -68,7 +57,18 @@ export interface UserData {
   hasInvitedToday: boolean;
   signalsReceived: number;
   signalsSent: number;
+  // Signal system
+  signalLiveUntil: number;
+  signalQueue: { queuedAt: number }[];
+  lastSignalQueuedDate: string;
+  signalsQueued: number;
+  signalsArrived: number;
+  signalsTraded: number;
+  signalsToOrder: number;
+  // Wallet
   walletAddress: string;
+  // Admin
+  isAdmin: boolean;
 }
 
 export interface LeaderboardEntry {
@@ -102,6 +102,49 @@ export interface AdminWitness {
   status: string;
 }
 
+// ============ FRIENDLY MESSAGES ============
+// Maps backend error fragments → friendly UI messages.
+// Never expose raw JSON to the user.
+export function friendlyError(e: unknown): string {
+  const msg = String(e || '');
+
+  // Signal system
+  if (msg.includes('One signal per day')) return 'One signal per day.';
+  if (msg.includes('No other members yet')) return 'The silence is complete. No one to signal yet.';
+
+  // Stay / cooldown
+  if (msg.includes('Cooldown active')) return 'They are still watching. Wait.';
+
+  // Invites
+  if (msg.includes('Invalid or used code')) return 'This code was not recognized.';
+  if (msg.includes('Code expired')) return 'This code has expired.';
+  if (msg.includes('Not eligible to invite yet')) return 'You are not yet eligible to invite.';
+  if (msg.includes('Already invited today')) return 'You have already invited someone today.';
+
+  // Wall
+  if (msg.includes('Already traced today')) return 'You have already left a trace today.';
+
+  // Auth
+  if (msg.includes('Missing initData')) return 'Open this app inside Telegram to continue.';
+  if (msg.includes('Invalid initData')) return 'Session expired. Reopen the app.';
+
+  // Witness
+  if (msg.includes('Missing link')) return 'A link is required.';
+
+  // Admin
+  if (msg.includes('Not the admin')) return 'You are not the admin.';
+  if (msg.includes('Witness not found')) return 'This witness no longer exists.';
+  if (msg.includes('Invalid status')) return 'Invalid action.';
+
+  // Network
+  if (msg.includes('Failed to fetch')) return 'The Order is silent. Try again.';
+  if (msg.includes('NetworkError')) return 'The Order is silent. Try again.';
+
+  // Fallback — never show raw error text
+  return 'Something was lost in the silence.';
+}
+// ===========================================
+
 export const api = {
   validateInvite: (code: string) =>
     apiCall<{ valid: boolean }>('/api/validate-invite', 'POST', { code }),
@@ -116,10 +159,11 @@ export const api = {
   ledger: () => apiCall<LedgerData>('/api/ledger'),
   first100: () => apiCall<LeaderboardEntry[]>('/api/first100'),
   witness: (link: string, violatorEcho: string, note: string) =>
-    apiCall<{ success: boolean; reward: number }>('/api/witness', 'POST', { link, violatorEcho, note }),
+    apiCall<{ success: boolean }>('/api/witness', 'POST', { link, violatorEcho, note }),
   disappeared: () => apiCall<DisappearedEntry[]>('/api/disappeared'),
   invite: () => apiCall<{ code: string; expiresAt: string }>('/api/invite', 'POST'),
-  signal: () => apiCall<{ success: boolean; reward: number }>('/api/signal', 'POST'),
+  signalTap: () =>
+    apiCall<{ outcome: 'traded' | 'live' | 'none' }>('/api/signal/tap', 'POST'),
   activity: () => apiCall<string[]>('/api/activity'),
   linkWallet: (address: string) =>
     apiCall<{ success: boolean; address: string }>('/api/link-wallet', 'POST', { address }),

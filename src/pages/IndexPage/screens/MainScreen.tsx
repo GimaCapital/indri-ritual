@@ -29,6 +29,7 @@ interface Props {
   onSignal: () => void;
   onWalletLinked: (address: string) => void;
   onGoTo: (screen: string) => void;
+  isAdmin: boolean;
   onGoToAdmin: () => void;
 }
 
@@ -40,7 +41,7 @@ export function MainScreen(props: Props) {
     isOnCooldown, cooldownRemaining, signalCooldown,
     walletAddress,
     onStartStay, onStopStay, onSigilTap, onSignal,
-    onWalletLinked, onGoTo, onGoToAdmin,
+    onWalletLinked, onGoTo, isAdmin, onGoToAdmin,
   } = props;
 
   const currentRank = getRank(silentDays);
@@ -179,23 +180,25 @@ export function MainScreen(props: Props) {
             <div style={{ display: 'flex', gap: '10px', marginTop: '10px', flexWrap: 'wrap', justifyContent: 'center' }}>
               <button onClick={() => onGoTo('first100')} style={smallButtonStyle}>First List</button>
             </div>
-            <button
-              onClick={onGoToAdmin}
-              style={{
-                marginTop: '16px',
-                padding: '6px 12px',
-                fontSize: '9px',
-                letterSpacing: '2px',
-                textTransform: 'uppercase',
-                border: '1px solid #1a1a1a',
-                background: 'transparent',
-                color: '#2a2a2a',
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-              }}
-            >
-              [admin]
-            </button>
+            {isAdmin && (
+              <button
+                onClick={onGoToAdmin}
+                style={{
+                  marginTop: '16px',
+                  padding: '6px 12px',
+                  fontSize: '9px',
+                  letterSpacing: '2px',
+                  textTransform: 'uppercase',
+                  border: '1px solid #1a1a1a',
+                  background: 'transparent',
+                  color: '#2a2a2a',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                }}
+              >
+                [admin]
+              </button>
+            )}
             <p style={{ marginTop: '20px', fontSize: '11px', color: '#555555', letterSpacing: '4px', textTransform: 'uppercase' }}>
               {secretEcho}
             </p>
