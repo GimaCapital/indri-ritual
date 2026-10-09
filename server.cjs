@@ -32,6 +32,9 @@ const CONFIG = {
   SIGNAL_LIVE_WINDOW_MS: 5 * 60 * 1000,     // how long a tap stays "live"
   SIGNAL_DELAY_MS: 24 * 60 * 60 * 1000,      // queue hold before firing
   SIGNAL_ORDER_WEEK_MS: 7 * 24 * 60 * 60 * 1000,
+
+  // Wallet
+  WALLET_BLOCK_DURATION_MS: 2 * 24 * 60 * 60 * 1000, // 2 days
 };
 
 // ============ REWARDS ============
@@ -741,8 +744,8 @@ app.post('/api/wallet/reject', validateTelegram, async (req, res) => {
   };
 
   if (next >= 4) {
-    updates.walletBlockedUntil = Date.now() + 7 * 24 * 60 * 60 * 1000;
-  }
+  updates.walletBlockedUntil = Date.now() + CONFIG.WALLET_BLOCK_DURATION_MS;
+}
 
   await userRef.update(updates);
 
