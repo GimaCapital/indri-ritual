@@ -70,6 +70,10 @@ export interface UserData {
   walletRejections: number;
   walletBlockedUntil: number;
   walletBlockReason: string;
+  // Claim
+  lastClaimAt: number;
+  pendingClaimId: string;
+  totalClaimed: number;
   // Admin
   isAdmin: boolean;
 }
@@ -106,10 +110,37 @@ export interface AdminWitness {
   status: string;
 }
 
+export interface ChainNode {
+  echo: string;
+  entryNumber: number;
+  silentDays: number;
+}
+
+export interface ChainData {
+  self: ChainNode;
+  ancestors: ChainNode[];
+  children: ChainNode[];
+}
+
 export interface WalletStatus {
   rejections: number;
   blockedUntil: number;
   reason: string;
+}
+
+// Claim
+export interface ClaimInitiateResponse {
+  claimId: string;
+  amount: number;
+  feeTON: number;
+  orderWallet: string;
+}
+
+export interface ClaimConfirmResponse {
+  success: boolean;
+  amount?: number;
+  status?: string;
+  message?: string;
 }
 
 // ============ FRIENDLY MESSAGES ============
@@ -144,6 +175,16 @@ export function friendlyError(e: unknown): string {
   if (msg.includes('Witness not found')) return 'This witness no longer exists.';
   if (msg.includes('Invalid status')) return 'Invalid action.';
 
+  // Claim
+  if (msg.includes('No wallet linked')) return 'Link a wallet first.';
+  if (msg.includes('Minimum claim is')) return 'Your share is too small to claim yet.';
+  if (msg.includes('Claim cooldown active')) return 'The ledger is not ready for you yet.';
+  if (msg.includes('Claim not found')) return 'This claim no longer exists.';
+  if (msg.includes('Not your claim')) return 'This claim is not yours.';
+  if (msg.includes('Claim already processed')) return 'This claim has already been processed.';
+  if (msg.includes('Payment not verified')) return 'The payment could not be verified.';
+  if (msg.includes('Missing claimId or txHash')) return 'The claim details are incomplete.';
+
   // Network
   if (msg.includes('Failed to fetch')) return 'The Order is silent. Try again.';
   if (msg.includes('NetworkError')) return 'The Order is silent. Try again.';
@@ -155,9 +196,9 @@ export function friendlyError(e: unknown): string {
 
 export const api = {
   validateInvite: (code: string) =>
-    apiCall<{ valid: boolean }>('/api/validate-invite', 'POST', { code }),
+  apiCall<{ valid: boolean }>('/api/validate-invite', 'POST', { code }),
   redeemInvite: (code: string) =>
-    apiCall<{ success: boolean; invitedBy: string }>('/api/redeem-invite', 'POST', { code }),
+  apiCall<{ success: boolean; invitedBy: string }>('/api/redeem-invite', 'POST', { code }),
   auth: () => apiCall<UserData>('/api/auth', 'POST'),
   vow: () => apiCall<{ success: boolean }>('/api/vow', 'POST'),
   stay: () => apiCall<UserData>('/api/stay', 'POST'),
@@ -167,17 +208,18 @@ export const api = {
   ledger: () => apiCall<LedgerData>('/api/ledger'),
   first100: () => apiCall<LeaderboardEntry[]>('/api/first100'),
   witness: (link: string, violatorEcho: string, note: string) =>
-    apiCall<{ success: boolean }>('/api/witness', 'POST', { link, violatorEcho, note }),
+  apiCall<{ success: boolean }>('/api/witness', 'POST', { link, violatorEcho, note }),
   disappeared: () => apiCall<DisappearedEntry[]>('/api/disappeared'),
   invite: () => apiCall<{ code: string; expiresAt: string }>('/api/invite', 'POST'),
   signalTap: () =>
-    apiCall<{ outcome: 'traded' | 'live' | 'none' }>('/api/signal/tap', 'POST'),
+  apiCall<{ outcome: 'traded' | 'live' | 'none' }>('/api/signal/tap', 'POST'),
   activity: () => apiCall<string[]>('/api/activity'),
   linkWallet: (address: string) =>
-    apiCall<{ success: boolean; address: string }>('/api/link-wallet', 'POST', { address }),
+  apiCall<{ success: boolean; address: string }>('/api/link-wallet', 'POST', { address }),
   adminWitnesses: () => apiCall<AdminWitness[]>('/api/admin/witnesses'),
   adminReviewWitness: (id: string, status: 'valid' | 'fake') =>
-    apiCall<{ success: boolean }>(`/api/admin/witness/${id}`, 'POST', { status }),
+  apiCall<{ success: boolean }>(`/api/admin/witness/${id}`, 'POST', { status }),
+  chain: () => apiCall<ChainData>('/api/chain'),
 
   // Wallet block system
   walletStatus: () => apiCall<WalletStatus>('/api/wallet/status'),
@@ -188,4 +230,9 @@ export const api = {
       { reason }
     ),
   walletClear: () => apiCall<{ success: boolean }>('/api/wallet/clear', 'POST'),
+
+  // Claim
+  claim: () => apiCall<ClaimInitiateResponse>('/api/claim', 'POST'),
+  claimConfirm: (claimId: string, txHash: string) =>
+    apiCall<ClaimConfirmResponse>('/api/claim/confirm', 'POST', { claimId, txHash }),
 };

@@ -4,9 +4,11 @@ import { api, type LedgerData } from '@/api';
 
 interface Props {
   onReturn: () => void;
+  onGoToClaim?: () => void;
+  canClaim?: boolean;
 }
 
-export function LedgerScreen({ onReturn }: Props) {
+export function LedgerScreen({ onReturn, onGoToClaim, canClaim }: Props) {
   const [data, setData] = useState<LedgerData | null>(null);
 
   useEffect(() => {
@@ -46,8 +48,39 @@ export function LedgerScreen({ onReturn }: Props) {
           {(data?.awaitingClaim ?? 0).toLocaleString()} $INDRI
         </p>
 
+        {/* Claim button — only when user can claim */}
+        {canClaim && onGoToClaim && (
+          <button
+            onClick={onGoToClaim}
+            style={{
+              marginTop: '20px',
+              padding: '10px 32px',
+              fontSize: '10px',
+              fontWeight: 'bold',
+              letterSpacing: '5px',
+              textTransform: 'uppercase',
+              border: '1px solid #555555',
+              background: 'transparent',
+              color: '#aaaaaa',
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              transition: 'all 0.3s ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = '#ffffff';
+              e.currentTarget.style.color = '#ffffff';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = '#555555';
+              e.currentTarget.style.color = '#aaaaaa';
+            }}
+          >
+            Claim
+          </button>
+        )}
+
         {/* The Order's pool */}
-        <p style={{ color: '#888888', marginTop: '20px' }}>The Order's Pool</p>
+        <p style={{ color: '#888888', marginTop: '24px' }}>The Order's Pool</p>
         <p style={{ color: '#ffffff', fontSize: '22px', fontWeight: 'bold' }}>
           {(data?.orderPool ?? 0).toLocaleString()} $INDRI
         </p>
@@ -91,7 +124,7 @@ export function LedgerScreen({ onReturn }: Props) {
           The proof is in the first wallet.
         </p>
         <p style={{ margin: '4px 0', color: '#aaaaaa' }}>
-          $INDRI is your share — held for you,
+          $INDRI is your share held for you,
           one tap to claim when the time comes.
         </p>
         <p style={{ margin: '16px 0 4px 0', color: '#888888' }}>
