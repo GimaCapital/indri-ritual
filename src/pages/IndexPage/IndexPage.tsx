@@ -1857,6 +1857,8 @@ export function IndexPage() {
       isOnCooldown={isOnCooldown}
       cooldownRemaining={cooldownRemaining}
       signalCooldown={signalCooldown}
+      signalsQueued={user?.signalsQueued || 0}
+      signalsArrived={user?.signalsArrived || 0}
       onStartStay={startStay}
       onStopStay={stopStay}
       onSigilTap={handleSigilTap}

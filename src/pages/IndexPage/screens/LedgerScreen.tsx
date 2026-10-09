@@ -40,13 +40,19 @@ export function LedgerScreen({ onReturn }: Props) {
           {(data?.totalDistributed ?? 0).toLocaleString()} $INDRI
         </p>
 
-        {/* What remains — waiting to be claimed on-chain */}
+        {/* What remains */}
         <p style={{ color: '#888888', marginTop: '20px' }}>Onchain Awaiting Claim</p>
         <p style={{ color: '#ffffff', fontSize: '22px', fontWeight: 'bold' }}>
           {(data?.awaitingClaim ?? 0).toLocaleString()} $INDRI
         </p>
 
-        {/* Supporting context */}
+        {/* The Order's pool */}
+        <p style={{ color: '#888888', marginTop: '20px' }}>The Order's Pool</p>
+        <p style={{ color: '#ffffff', fontSize: '22px', fontWeight: 'bold' }}>
+          {(data?.orderPool ?? 0).toLocaleString()} $INDRI
+        </p>
+
+        {/* Members */}
         <p style={{ color: '#888888', marginTop: '20px' }}>Members</p>
         <p style={{ color: '#ffffff', fontSize: '22px', fontWeight: 'bold' }}>
           {(data?.totalMembers ?? 0).toLocaleString()}
@@ -87,6 +93,10 @@ export function LedgerScreen({ onReturn }: Props) {
         <p style={{ margin: '4px 0', color: '#aaaaaa' }}>
           $INDRI is your share — held for you,
           one tap to claim when the time comes.
+        </p>
+        <p style={{ margin: '16px 0 4px 0', color: '#888888' }}>
+          What cannot be delivered returns to the pool.
+          The pool returns to all.
         </p>
       </div>
 

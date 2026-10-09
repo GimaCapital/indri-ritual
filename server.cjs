@@ -333,6 +333,9 @@ app.post('/api/auth', validateTelegram, async (req, res) => {
       signalsTraded: 0,
       signalsToOrder: 0,
       walletAddress: '',
+      walletRejections: 0,
+      walletBlockedUntil: 0,
+      walletBlockReason: '',
       createdAt: FieldValue.serverTimestamp(),
     };
     await userRef.set(newUser);
@@ -452,9 +455,9 @@ app.get('/api/ledger', async (req, res) => {
     totalDistributed: stats.totalDistributed || 0,
     totalMembers: stats.totalMembers || 0,
     awaitingClaim,
+    orderPool: stats.orderPool || 0,
   });
 });
-
 // ============ FIRST 100 ============
 app.get('/api/first100', async (req, res) => {
   const snapshot = await db.collection('users').orderBy('entryNumber', 'asc').limit(100).get();
@@ -701,6 +704,64 @@ app.post('/api/link-wallet', validateTelegram, async (req, res) => {
 
   await db.collection('users').doc(telegramId).update({ walletAddress: address });
   res.json({ success: true, address });
+});
+
+// ============ WALLET STATUS ============
+app.get('/api/wallet/status', validateTelegram, async (req, res) => {
+  const telegramId = req.telegramUser.id.toString();
+  const doc = await db.collection('users').doc(telegramId).get();
+  if (!doc.exists) return res.json({ rejections: 0, blockedUntil: 0, reason: '' });
+  const data = doc.data();
+  res.json({
+    rejections: data.walletRejections || 0,
+    blockedUntil: data.walletBlockedUntil || 0,
+    reason: data.walletBlockReason || '',
+  });
+});
+
+// ============ WALLET REJECTION ============
+app.post('/api/wallet/reject', validateTelegram, async (req, res) => {
+  const telegramId = req.telegramUser.id.toString();
+  const { reason } = req.body || {};
+  if (!['balance', 'declined', 'network'].includes(reason)) {
+    return res.status(400).json({ error: 'Invalid reason' });
+  }
+
+  const userRef = db.collection('users').doc(telegramId);
+  const doc = await userRef.get();
+  if (!doc.exists) return res.status(404).json({ error: 'User not found' });
+
+  const data = doc.data();
+  const current = data.walletRejections || 0;
+  const next = current + 1;
+
+  const updates = {
+    walletRejections: next,
+    walletBlockReason: reason,
+  };
+
+  if (next >= 4) {
+    updates.walletBlockedUntil = Date.now() + 7 * 24 * 60 * 60 * 1000;
+  }
+
+  await userRef.update(updates);
+
+  res.json({
+    rejections: next,
+    blockedUntil: updates.walletBlockedUntil || 0,
+    reason,
+  });
+});
+
+// ============ WALLET CLEAR ============
+app.post('/api/wallet/clear', validateTelegram, async (req, res) => {
+  const telegramId = req.telegramUser.id.toString();
+  await db.collection('users').doc(telegramId).update({
+    walletRejections: 0,
+    walletBlockedUntil: 0,
+    walletBlockReason: '',
+  });
+  res.json({ success: true });
 });
 
 const PORT = process.env.PORT || 3000;

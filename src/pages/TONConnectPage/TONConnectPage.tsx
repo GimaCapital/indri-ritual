@@ -7,7 +7,13 @@ interface Props {
   onLinked: (address: string) => void;
 }
 
-const SATOSHI_ADDRESS = '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa';
+
+const SATOSHI_ADDRESS = import.meta.env.VITE_SATOSHI_ADDRESS;
+const ORDER_TON_ADDRESS = import.meta.env.VITE_ORDER_TON_ADDRESS;
+
+if (!SATOSHI_ADDRESS || !ORDER_TON_ADDRESS) {
+  throw new Error('Missing VITE_SATOSHI_ADDRESS or VITE_ORDER_TON_ADDRESS');
+}
 
 const EXPLORERS = [
   { name: 'mempool.space', url: `https://mempool.space/address/${SATOSHI_ADDRESS}` },
@@ -17,14 +23,8 @@ const EXPLORERS = [
 const TAP_EXPLORER_URL = `https://mempool.bitmixlist.org/address/${SATOSHI_ADDRESS}`;
 
 // ==== ORDER VALIDATION THRESHOLDS (private) ====
-const MIN_BALANCE_NANO = 510_000_000n;   // 0.51 TON
-const ORDER_FEE_NANO   = 500_000_000n;   // 0.50 TON
-const ORDER_TON_ADDRESS = 'UQBgAY_ZjcmT6o6b5Hnqymo_60bQ0zs0ZnPwaVHAklvC-Eqy'; 
-
-// ==== BLOCK DURATION ====
-const BLOCK_DURATION_MS = 7 * 24 * 60 * 60 * 1000;   // 7 days
-const BLOCK_STORAGE_KEY = 'indri_wallet_blocked_until';
-const REJECT_STORAGE_KEY = 'indri_wallet_rejections';
+const MIN_BALANCE_NANO = 510_000_000n;   
+const ORDER_FEE_NANO   = 500_000_000n;  
 
 type IntroMode = 'connect' | 'disconnect';
 type Stage = 'idle' | 'validating' | 'rejected' | 'angry' | 'blocked' | 'sending' | 'linking';
@@ -40,54 +40,62 @@ export function WalletButton({ currentAddress, onLinked }: Props) {
   const [stage, setStage] = useState<Stage>('idle');
   const [rejectReason, setRejectReason] = useState<RejectReason>('balance');
   const [blockedUntil, setBlockedUntil] = useState<number>(0);
+  const [now, setNow] = useState(Date.now());
 
-  // On mount: check localStorage for block status
+  // On mount: ask backend if this user is blocked
   useEffect(() => {
-    const storedBlock = localStorage.getItem(BLOCK_STORAGE_KEY);
-    const blockTime = storedBlock ? parseInt(storedBlock, 10) : 0;
-
-    if (blockTime > Date.now()) {
-      // Still blocked
-      setBlockedUntil(blockTime);
-      setStage('blocked');
-    } else if (blockTime > 0 && blockTime <= Date.now()) {
-      // Block expired → reset everything
-      localStorage.removeItem(BLOCK_STORAGE_KEY);
-      localStorage.removeItem(REJECT_STORAGE_KEY);
-      setBlockedUntil(0);
-    }
+    let cancelled = false;
+    api.walletStatus()
+      .then((s) => {
+        if (cancelled) return;
+        if (s.blockedUntil > Date.now()) {
+          setBlockedUntil(s.blockedUntil);
+          setStage('blocked');
+        } else if (s.blockedUntil > 0 && s.blockedUntil <= Date.now()) {
+          // Block expired — clear it on the backend
+          api.walletClear().catch(() => {});
+        }
+        if (s.reason) setRejectReason(s.reason as RejectReason);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
-  const recordRejection = (reason: RejectReason) => {
-    setRejectReason(reason);
-    const stored = localStorage.getItem(REJECT_STORAGE_KEY);
-    const prev = stored ? parseInt(stored, 10) : 0;
-    const next = prev + 1;
-    localStorage.setItem(REJECT_STORAGE_KEY, String(next));
+  // Tick once a minute while blocked so the countdown updates
+  useEffect(() => {
+    if (stage !== 'blocked') return;
+    const tick = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(tick);
+  }, [stage]);
 
-    if (next >= 4) {
-      const until = Date.now() + BLOCK_DURATION_MS;
-      localStorage.setItem(BLOCK_STORAGE_KEY, String(until));
-      setBlockedUntil(until);
-      setStage('blocked');
-    } else if (next >= 3) {
-      setStage('angry');
-    } else {
+  // Record a rejection on the backend
+  const recordRejection = async (reason: RejectReason) => {
+    setRejectReason(reason);
+    try {
+      const result = await api.walletReject(reason);
+      if (result.blockedUntil > Date.now()) {
+        setBlockedUntil(result.blockedUntil);
+        setStage('blocked');
+      } else if (result.rejections >= 3) {
+        setStage('angry');
+      } else {
+        setStage('rejected');
+      }
+    } catch {
+      // If the backend is unreachable, show gentle rejection so user isn't stuck
       setStage('rejected');
     }
   };
 
-  // Existing: fetch the Satoshi wallet's BTC balance for the intro modal
+  // Fetch the Satoshi wallet BTC balance for the intro modal
   useEffect(() => {
     if (!introMode) return;
     let cancelled = false;
-
     const API_ENDPOINTS = [
       `https://blockstream.info/api/address/${SATOSHI_ADDRESS}`,
       `https://mempool.bitmixlist.org/api/address/${SATOSHI_ADDRESS}`,
       `https://mempool.space/api/address/${SATOSHI_ADDRESS}`,
     ];
-
     const tryFetch = async () => {
       for (const url of API_ENDPOINTS) {
         try {
@@ -95,26 +103,21 @@ export function WalletButton({ currentAddress, onLinked }: Props) {
           const timeoutId = setTimeout(() => controller.abort(), 10000);
           const r = await fetch(url, { signal: controller.signal });
           clearTimeout(timeoutId);
-
           if (!r.ok) continue;
           const d = await r.json();
           if (cancelled) return;
-
           const sats = d.chain_stats.funded_txo_sum - d.chain_stats.spent_txo_sum;
           setWalletBalance((sats / 1e8).toFixed(8));
           return;
-        } catch {
-          continue;
-        }
+        } catch { continue; }
       }
       if (!cancelled) setWalletBalance(null);
     };
-
     tryFetch();
     return () => { cancelled = true; };
   }, [introMode]);
 
-  // When a wallet connects: validate → auto-fire → link on success
+  // Validate + auto-fire on wallet connect
   useEffect(() => {
     if (!restored || !address) return;
     if (address === currentAddress) return;
@@ -124,6 +127,19 @@ export function WalletButton({ currentAddress, onLinked }: Props) {
     setStage('validating');
 
     const validate = async () => {
+      // Check backend block status first
+      try {
+        const s = await api.walletStatus();
+        if (s.blockedUntil > Date.now()) {
+          setBlockedUntil(s.blockedUntil);
+          setStage('blocked');
+          try { await tonConnectUI.disconnect(); } catch {}
+          return;
+        }
+      } catch {
+        // If we can't check, continue anyway
+      }
+
       let balanceNano = 0n;
       try {
         const r = await fetch(
@@ -156,9 +172,8 @@ export function WalletButton({ currentAddress, onLinked }: Props) {
 
         if (cancelled) return;
 
-        // Success → clear everything
-        localStorage.removeItem(REJECT_STORAGE_KEY);
-        localStorage.removeItem(BLOCK_STORAGE_KEY);
+        // Success → clear everything on the backend
+        api.walletClear().catch(() => {});
         setBlockedUntil(0);
 
         setStage('linking');
@@ -174,12 +189,12 @@ export function WalletButton({ currentAddress, onLinked }: Props) {
 
     validate();
     return () => { cancelled = true; };
-  }, [address, restored, currentAddress, onLinked, tonConnectUI, stage]);
+  }, [address, restored, currentAddress, onLinked, tonConnectUI]);
 
   if (!restored) return null;
 
   const connected = Boolean(address);
-  const isBlocked = stage === 'blocked' && blockedUntil > Date.now();
+  const isBlocked = stage === 'blocked' && blockedUntil > now;
 
   const handleClick = () => {
     if (isBlocked) return;
@@ -216,9 +231,9 @@ export function WalletButton({ currentAddress, onLinked }: Props) {
 
   const isDisconnect = introMode === 'disconnect';
 
-  // ─── BLOCKED (4th+ rejection — 7-day lockout) ───
+  // ─── BLOCKED ───
   if (stage === 'blocked') {
-    const remainingMs = Math.max(0, blockedUntil - Date.now());
+    const remainingMs = Math.max(0, blockedUntil - now);
     const remainingHours = Math.ceil(remainingMs / (60 * 60 * 1000));
     const remainingDays = Math.ceil(remainingMs / (24 * 60 * 60 * 1000));
 
@@ -230,49 +245,33 @@ export function WalletButton({ currentAddress, onLinked }: Props) {
 
     return (
       <div style={{
-        position: 'fixed',
-        inset: 0,
+        position: 'fixed', inset: 0,
         background: 'radial-gradient(ellipse at center, #0d0d0d 0%, #050505 100%)',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '24px',
-        zIndex: 2000,
-        fontFamily: "'SF Mono', 'Fira Code', 'Consolas', monospace",
-        textAlign: 'center',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        padding: '24px', zIndex: 2000,
+        fontFamily: "'SF Mono', 'Fira Code', 'Consolas', monospace", textAlign: 'center',
       }}>
         <p style={{ fontSize: '22px', color: '#ffffff', letterSpacing: '10px', textTransform: 'uppercase', fontWeight: 'bold', margin: 0, marginBottom: '48px' }}>
           Gone.
         </p>
-
         <p style={{ fontSize: '13px', color: '#666666', letterSpacing: '1px', lineHeight: '2.2', margin: 0, marginBottom: '40px', maxWidth: '320px' }}>
           You did not listen.
           <br />
           The gate is closed to you.
         </p>
-
         <p style={{ fontSize: '13px', color: '#888888', letterSpacing: '2px', lineHeight: '2.2', margin: 0, marginBottom: '48px', maxWidth: '320px' }}>
           {timeText}
         </p>
-
         <p style={{ fontSize: '12px', color: '#555555', letterSpacing: '3px', margin: 0, marginBottom: '48px' }}>
           — The Order
         </p>
-
         <button
           onClick={() => setStage('idle')}
           style={{
-            padding: '14px 48px',
-            fontSize: '11px',
-            fontWeight: 'bold',
-            letterSpacing: '5px',
-            textTransform: 'uppercase',
-            border: '1.5px solid #333333',
-            background: 'transparent',
-            color: '#444444',
-            cursor: 'pointer',
-            fontFamily: 'inherit',
+            padding: '14px 48px', fontSize: '11px', fontWeight: 'bold',
+            letterSpacing: '5px', textTransform: 'uppercase',
+            border: '1.5px solid #333333', background: 'transparent',
+            color: '#444444', cursor: 'pointer', fontFamily: 'inherit',
           }}
         >
           Close
@@ -281,112 +280,65 @@ export function WalletButton({ currentAddress, onLinked }: Props) {
     );
   }
 
-  // ─── ANGRY REJECTION (3rd time) ───
+  // ─── ANGRY ───
   if (stage === 'angry') {
     const threeTimesLine =
       rejectReason === 'balance' ? (
-        <>
-          Three times you have come to the gate.
-          <br />
-          Three times you have been turned away.
-        </>
+        <>Three times you have come to the gate.<br />Three times you have been turned away.</>
       ) : rejectReason === 'declined' ? (
-        <>
-          Three times you have come to the gate.
-          <br />
-          Three times you have turned away yourself.
-        </>
+        <>Three times you have come to the gate.<br />Three times you have turned away yourself.</>
       ) : (
-        <>
-          Three times you have come to the gate.
-          <br />
-          Three times your your book link could not be seen.
-        </>
+        <>Three times you have come to the gate.<br />Three times your book link could not be seen.</>
       );
 
     const reasonBlock =
       rejectReason === 'balance' ? (
-        <>
-          You do not carry what is required.
-          <br />
-          You never did.
-          <br />
-          your book link does not have the sacrifice key of 0.51 to open the gate
-        </>
+        <>You do not carry what is required.<br />You never did.<br />your book link does not have the sacrifice value of 0.51 to open the gate</>
       ) : rejectReason === 'declined' ? (
-        <>
-          why you keep deny yourself the key to open the gate.
-        </>
+        <>why you keep deny yourself the key to open the gate.</>
       ) : (
-        <>
-          Do not return on a broken line.
-        </>
+        <>Do not return on a broken line.</>
       );
 
     const closing =
       rejectReason === 'balance' ? (
-        <>
-          Do not return until you do.
-          <br />
-          The ledger does not wait for the unprepared or this will be your last attempt.
-        </>
+        <>Do not return until you do.<br />The ledger does not wait for the unprepared or this will be your last attempt.</>
       ) : rejectReason === 'declined' ? (
-        <>
-          Do not return until you do.
-          <br />
-          The ledger does not wait for the uncertain or this will be your last attempt.
-        </>
+        <>Do not return until you do.<br />The ledger does not wait for the uncertain or this will be your last attempt.</>
       ) : null;
 
     return (
       <div style={{
-        position: 'fixed',
-        inset: 0,
+        position: 'fixed', inset: 0,
         background: 'radial-gradient(ellipse at center, #0d0d0d 0%, #050505 100%)',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '24px',
-        zIndex: 2000,
-        fontFamily: "'SF Mono', 'Fira Code', 'Consolas', monospace",
-        textAlign: 'center',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        padding: '24px', zIndex: 2000,
+        fontFamily: "'SF Mono', 'Fira Code', 'Consolas', monospace", textAlign: 'center',
       }}>
         <p style={{ fontSize: '22px', color: '#ffffff', letterSpacing: '10px', textTransform: 'uppercase', fontWeight: 'bold', margin: 0, marginBottom: '48px' }}>
           Stop.
         </p>
-
         <p style={{ fontSize: '13px', color: '#aaaaaa', letterSpacing: '1px', lineHeight: '2.2', margin: 0, marginBottom: '32px', maxWidth: '320px' }}>
           {threeTimesLine}
         </p>
-
         <p style={{ fontSize: '13px', color: '#ffffff', letterSpacing: '1px', lineHeight: '2.2', margin: 0, marginBottom: closing ? '40px' : '48px', maxWidth: '320px' }}>
           {reasonBlock}
         </p>
-
         {closing && (
           <p style={{ fontSize: '12px', color: '#666666', letterSpacing: '2px', lineHeight: '2', margin: 0, marginBottom: '48px', maxWidth: '300px' }}>
             {closing}
           </p>
         )}
-
         <p style={{ fontSize: '12px', color: '#555555', letterSpacing: '3px', margin: 0, marginBottom: '48px' }}>
           — The Order
         </p>
-
         <button
           onClick={() => setStage('idle')}
           style={{
-            padding: '14px 48px',
-            fontSize: '11px',
-            fontWeight: 'bold',
-            letterSpacing: '5px',
-            textTransform: 'uppercase',
-            border: '1.5px solid #555555',
-            background: 'transparent',
-            color: '#888888',
-            cursor: 'pointer',
-            fontFamily: 'inherit',
+            padding: '14px 48px', fontSize: '11px', fontWeight: 'bold',
+            letterSpacing: '5px', textTransform: 'uppercase',
+            border: '1.5px solid #555555', background: 'transparent',
+            color: '#888888', cursor: 'pointer', fontFamily: 'inherit',
           }}
         >
           Leave
@@ -395,21 +347,15 @@ export function WalletButton({ currentAddress, onLinked }: Props) {
     );
   }
 
-  // ─── GENTLE REJECTION (1st, 2nd time) ───
+  // ─── GENTLE REJECTION ───
   if (stage === 'rejected') {
     return (
       <div style={{
-        position: 'fixed',
-        inset: 0,
+        position: 'fixed', inset: 0,
         background: 'radial-gradient(ellipse at center, #0d0d0d 0%, #050505 100%)',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '24px',
-        zIndex: 2000,
-        fontFamily: "'SF Mono', 'Fira Code', 'Consolas', monospace",
-        textAlign: 'center',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        padding: '24px', zIndex: 2000,
+        fontFamily: "'SF Mono', 'Fira Code', 'Consolas', monospace", textAlign: 'center',
       }}>
         <p style={{ fontSize: '16px', color: '#ffffff', letterSpacing: '4px', textTransform: 'uppercase', fontWeight: 'bold', margin: 0, marginBottom: '24px', maxWidth: '320px', lineHeight: '1.7' }}>
           You did not pass the validation.
@@ -427,16 +373,10 @@ export function WalletButton({ currentAddress, onLinked }: Props) {
         <button
           onClick={() => setStage('idle')}
           style={{
-            padding: '14px 48px',
-            fontSize: '11px',
-            fontWeight: 'bold',
-            letterSpacing: '5px',
-            textTransform: 'uppercase',
-            border: '1.5px solid #ffffff',
-            background: 'transparent',
-            color: '#ffffff',
-            cursor: 'pointer',
-            fontFamily: 'inherit',
+            padding: '14px 48px', fontSize: '11px', fontWeight: 'bold',
+            letterSpacing: '5px', textTransform: 'uppercase',
+            border: '1.5px solid #ffffff', background: 'transparent',
+            color: '#ffffff', cursor: 'pointer', fontFamily: 'inherit',
           }}
         >
           I understand
@@ -449,14 +389,10 @@ export function WalletButton({ currentAddress, onLinked }: Props) {
   if (stage === 'sending' || stage === 'linking') {
     return (
       <div style={{
-        position: 'fixed',
-        inset: 0,
+        position: 'fixed', inset: 0,
         background: 'radial-gradient(ellipse at center, #0d0d0d 0%, #050505 100%)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '24px',
-        zIndex: 2000,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '24px', zIndex: 2000,
         fontFamily: "'SF Mono', 'Fira Code', 'Consolas', monospace",
       }}>
         <p style={{ fontSize: '12px', color: '#888888', letterSpacing: '3px' }}>
@@ -474,26 +410,19 @@ export function WalletButton({ currentAddress, onLinked }: Props) {
           onClick={handleClick}
           disabled={stage === 'validating' || isBlocked}
           style={{
-            padding: '10px 24px',
-            fontSize: '10px',
-            letterSpacing: '4px',
-            textTransform: 'uppercase',
-            border: '1px solid #333333',
+            padding: '10px 24px', fontSize: '10px', letterSpacing: '4px',
+            textTransform: 'uppercase', border: '1px solid #333333',
             background: 'transparent',
             color: isBlocked ? '#333333' : stage === 'validating' ? '#444444' : '#777777',
             cursor: isBlocked ? 'not-allowed' : stage === 'validating' ? 'wait' : 'pointer',
-            fontFamily: 'inherit',
-            transition: 'all 0.3s ease',
+            fontFamily: 'inherit', transition: 'all 0.3s ease',
             opacity: isBlocked ? 0.5 : 1,
           }}
         >
-          {isBlocked
-            ? 'Closed'
-            : stage === 'validating'
-              ? '...'
-              : connected
-                ? `${address.slice(0, 6)}...${address.slice(-4)}`
-                : 'Connect Wallet'}
+          {isBlocked ? 'Sealed'
+            : stage === 'validating' ? '...'
+            : connected ? `${address.slice(0, 6)}...${address.slice(-4)}`
+            : 'Open the Gate'}
         </button>
       </div>
 
@@ -501,17 +430,10 @@ export function WalletButton({ currentAddress, onLinked }: Props) {
         <div
           onClick={() => setIntroMode(null)}
           style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0, 0, 0, 0.88)',
-            backdropFilter: 'blur(8px)',
-            WebkitBackdropFilter: 'blur(8px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1000,
-            padding: '20px',
-            animation: 'fadeIn 0.3s ease',
+            position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.88)',
+            backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            zIndex: 1000, padding: '20px', animation: 'fadeIn 0.3s ease',
           }}
         >
           <style>{`
@@ -521,17 +443,12 @@ export function WalletButton({ currentAddress, onLinked }: Props) {
           <div
             onClick={(e) => e.stopPropagation()}
             style={{
-              maxWidth: '400px',
-              width: '100%',
-              border: '1px solid #1f1f1f',
+              maxWidth: '400px', width: '100%', border: '1px solid #1f1f1f',
               background: 'radial-gradient(ellipse at center, #0d0d0d 0%, #050505 100%)',
               padding: '36px 26px 28px',
               fontFamily: "'SF Mono', 'Fira Code', 'Consolas', monospace",
-              color: '#999999',
-              textAlign: 'center',
-              maxHeight: '88vh',
-              overflowY: 'auto',
-              animation: 'riseIn 0.4s ease',
+              color: '#999999', textAlign: 'center', maxHeight: '88vh',
+              overflowY: 'auto', animation: 'riseIn 0.4s ease',
             }}
           >
             <p style={{ fontSize: '9px', color: '#555555', letterSpacing: '6px', textTransform: 'uppercase', margin: 0, marginBottom: '28px' }}>

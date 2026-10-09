@@ -23,6 +23,8 @@ interface Props {
   cooldownRemaining: number;
   signalCooldown: boolean;
   walletAddress: string;
+  signalsQueued: number;
+  signalsArrived: number;
   onStartStay: () => void;
   onStopStay: () => void;
   onSigilTap: () => void;
@@ -39,13 +41,15 @@ export function MainScreen(props: Props) {
     isStaying, staySeconds, eyesOpen, rewardMessage,
     orderVoice, watchingMessage, flashNumber,
     isOnCooldown, cooldownRemaining, signalCooldown,
-    walletAddress,
+    walletAddress, signalsQueued, signalsArrived,
     onStartStay, onStopStay, onSigilTap, onSignal,
     onWalletLinked, onGoTo, isAdmin, onGoToAdmin,
   } = props;
 
   const currentRank = getRank(silentDays);
   const currentMultiplier = getMultiplier(silentDays);
+
+  const showSignalStats = signalsQueued > 0 || signalsArrived > 0;
 
   return (
     <div style={{
@@ -161,6 +165,41 @@ export function MainScreen(props: Props) {
       >
         {signalCooldown ? 'Signal Sent' : 'Send Signal'}
       </button>
+
+      {showSignalStats && (
+        <div style={{
+          marginTop: '14px',
+          display: 'flex',
+          gap: '16px',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 3,
+          position: 'relative',
+        }}>
+          {signalsQueued > 0 && (
+            <p style={{
+              fontSize: '10px',
+              color: '#444444',
+              letterSpacing: '3px',
+              textTransform: 'uppercase',
+              margin: 0,
+            }}>
+              {signalsQueued} in flight
+            </p>
+          )}
+          {signalsArrived > 0 && (
+            <p style={{
+              fontSize: '10px',
+              color: '#555555',
+              letterSpacing: '3px',
+              textTransform: 'uppercase',
+              margin: 0,
+            }}>
+              {signalsArrived} arrived
+            </p>
+          )}
+        </div>
+      )}
 
       <WalletButton currentAddress={walletAddress} onLinked={onWalletLinked} />
 

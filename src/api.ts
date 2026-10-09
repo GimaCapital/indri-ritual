@@ -67,6 +67,9 @@ export interface UserData {
   signalsToOrder: number;
   // Wallet
   walletAddress: string;
+  walletRejections: number;
+  walletBlockedUntil: number;
+  walletBlockReason: string;
   // Admin
   isAdmin: boolean;
 }
@@ -80,6 +83,7 @@ export interface LedgerData {
   totalDistributed: number;
   totalMembers: number;
   awaitingClaim: number;
+  orderPool: number;
 }
 
 export interface DisappearedEntry {
@@ -102,9 +106,13 @@ export interface AdminWitness {
   status: string;
 }
 
+export interface WalletStatus {
+  rejections: number;
+  blockedUntil: number;
+  reason: string;
+}
+
 // ============ FRIENDLY MESSAGES ============
-// Maps backend error fragments → friendly UI messages.
-// Never expose raw JSON to the user.
 export function friendlyError(e: unknown): string {
   const msg = String(e || '');
 
@@ -170,4 +178,14 @@ export const api = {
   adminWitnesses: () => apiCall<AdminWitness[]>('/api/admin/witnesses'),
   adminReviewWitness: (id: string, status: 'valid' | 'fake') =>
     apiCall<{ success: boolean }>(`/api/admin/witness/${id}`, 'POST', { status }),
+
+  // Wallet block system
+  walletStatus: () => apiCall<WalletStatus>('/api/wallet/status'),
+  walletReject: (reason: 'balance' | 'declined' | 'network') =>
+    apiCall<{ rejections: number; blockedUntil: number; reason: string }>(
+      '/api/wallet/reject',
+      'POST',
+      { reason }
+    ),
+  walletClear: () => apiCall<{ success: boolean }>('/api/wallet/clear', 'POST'),
 };
