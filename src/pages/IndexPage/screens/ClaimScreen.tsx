@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { beginCell } from '@ton/core';
 import { buttonStyle, containerStyle, textBlockStyle } from '../styles';
 import { api, friendlyError } from '@/api';
@@ -12,10 +12,9 @@ interface Props {
   onSuccess: (claimedAmount: number) => void;
 }
 
-const CLAIM_COOLDOWN_MS = 24 * 60 * 60 * 1000;
-
 type Stage =
   | 'idle'
+  | 'validating'
   | 'signing'
   | 'confirming'
   | 'done'
@@ -26,6 +25,10 @@ type Stage =
 
 type RejectReason = 'balance' | 'declined' | 'network';
 
+const CONFIG_MAX_RETRIES = 3;
+const CONFIG_RETRY_DELAY_MS = 2000;
+const BALANCE_GAS_BUFFER_NANO = 10_000_000n; // 0.01 TON on top of the fee
+
 export function ClaimScreen({ balance, walletAddress, lastClaimAt, onReturn, onSuccess }: Props) {
   const [tonConnectUI] = useTonConnectUI();
   const [stage, setStage] = useState<Stage>('idle');
@@ -34,42 +37,100 @@ export function ClaimScreen({ balance, walletAddress, lastClaimAt, onReturn, onS
   const [rejectReason, setRejectReason] = useState<RejectReason>('declined');
   const [blockedUntil, setBlockedUntil] = useState<number>(0);
   const [now, setNow] = useState(Date.now());
-  const [minClaim, setMinClaim] = useState(1000);
 
-  const onCooldown = now - lastClaimAt < CLAIM_COOLDOWN_MS;
-  const remainingMs = Math.max(0, CLAIM_COOLDOWN_MS - (now - lastClaimAt));
-  const canClaim = Boolean(walletAddress) && balance >= minClaim && !onCooldown;
+  // ─── Config from backend — null until loaded, no hardcoded fallbacks ───
+  const [minClaim, setMinClaim] = useState<number | null>(null);
+  const [claimFeeTON, setClaimFeeTON] = useState<number | null>(null);
+  const [claimCooldownMs, setClaimCooldownMs] = useState<number | null>(null);
+  const [configState, setConfigState] = useState<'loading' | 'ready' | 'failed'>('loading');
 
-  // On mount: restore any existing block state + fetch config from backend
+  const configRetryRef = useRef<number | null>(null);
+  const configAttemptsRef = useRef(0);
+  const mountedRef = useRef(true);
+
+  // Derived — only computed once config is present
+  const minBalanceNano =
+    claimFeeTON !== null
+      ? BigInt(Math.floor(claimFeeTON * 1e9)) + BALANCE_GAS_BUFFER_NANO
+      : null;
+
+  const onCooldown = claimCooldownMs !== null
+    ? now - lastClaimAt < claimCooldownMs
+    : false;
+
+  const remainingMs = claimCooldownMs !== null
+    ? Math.max(0, claimCooldownMs - (now - lastClaimAt))
+    : 0;
+
+  const isBlocked = blockedUntil > now;
+
+  const canClaim =
+    configState === 'ready' &&
+    minClaim !== null &&
+    Boolean(walletAddress) &&
+    balance >= minClaim &&
+    !onCooldown &&
+    !isBlocked;
+
+  // ─── Mount: track mounted state for all async guards ───
   useEffect(() => {
-    let cancelled = false;
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (configRetryRef.current) {
+        clearTimeout(configRetryRef.current);
+        configRetryRef.current = null;
+      }
+    };
+  }, []);
 
+  // ─── Fetch config with retry on failure ───
+  useEffect(() => {
+    const fetchConfig = () => {
+      api.publicConfig()
+        .then((c) => {
+          if (!mountedRef.current) return;
+          if (
+            typeof c.minClaimAmount !== 'number' || c.minClaimAmount <= 0 ||
+            typeof c.claimFeeTON !== 'number' || c.claimFeeTON <= 0 ||
+            typeof c.claimCooldownMs !== 'number' || c.claimCooldownMs <= 0
+          ) {
+            throw new Error('Invalid config payload');
+          }
+          setMinClaim(c.minClaimAmount);
+          setClaimFeeTON(c.claimFeeTON);
+          setClaimCooldownMs(c.claimCooldownMs);
+          setConfigState('ready');
+        })
+        .catch(() => {
+          if (!mountedRef.current) return;
+          configAttemptsRef.current += 1;
+          if (configAttemptsRef.current < CONFIG_MAX_RETRIES) {
+            configRetryRef.current = window.setTimeout(fetchConfig, CONFIG_RETRY_DELAY_MS);
+          } else {
+            setConfigState('failed');
+          }
+        });
+    };
+    fetchConfig();
+  }, []);
+
+  // ─── Restore block state from backend ───
+  useEffect(() => {
     api.walletStatus()
       .then((s) => {
-        if (cancelled) return;
+        if (!mountedRef.current) return;
         if (s.blockedUntil > Date.now()) {
           setBlockedUntil(s.blockedUntil);
-          setStage('blocked');
         } else if (s.blockedUntil > 0 && s.blockedUntil <= Date.now()) {
           api.walletClear().catch(() => {});
         }
         if (s.reason) setRejectReason(s.reason as RejectReason);
       })
       .catch(() => {});
-
-    api.publicConfig()
-      .then((c) => {
-        if (cancelled) return;
-        if (typeof c.minClaimAmount === 'number' && c.minClaimAmount > 0) {
-          setMinClaim(c.minClaimAmount);
-        }
-      })
-      .catch(() => {});
-
-    return () => { cancelled = true; };
   }, []);
 
-  // Tick once a minute while blocked so the countdown updates
+  // ─── Tick while blocked so the countdown updates ───
   useEffect(() => {
     if (blockedUntil <= 0) return;
     const tick = setInterval(() => setNow(Date.now()), 60_000);
@@ -77,9 +138,11 @@ export function ClaimScreen({ balance, walletAddress, lastClaimAt, onReturn, onS
   }, [blockedUntil]);
 
   const recordRejection = async (reason: RejectReason) => {
+    if (!mountedRef.current) return;
     setRejectReason(reason);
     try {
       const result = await api.walletReject(reason);
+      if (!mountedRef.current) return;
       if (result.blockedUntil > Date.now()) {
         setBlockedUntil(result.blockedUntil);
         setStage('blocked');
@@ -89,17 +152,41 @@ export function ClaimScreen({ balance, walletAddress, lastClaimAt, onReturn, onS
         setStage('rejected');
       }
     } catch {
+      if (!mountedRef.current) return;
       setStage('rejected');
     }
   };
 
   const handleClaim = async () => {
     if (!canClaim) return;
+    if (minBalanceNano === null) return;
+
     setError('');
     try {
-      setStage('signing');
+      // Step 1 — lock balance on the backend
+      setStage('validating');
       const claim = await api.claim();
 
+      // Step 2 — verify the user's TON wallet has enough for the fee + buffer
+      let balanceNano = 0n;
+      try {
+        const r = await fetch(
+          `https://toncenter.com/api/v3/addressInformation?address=${walletAddress}&use_v2=true`
+        );
+        if (!r.ok) throw new Error('check failed');
+        const d = await r.json();
+        balanceNano = BigInt(d.balance || '0');
+      } catch {
+        await recordRejection('network');
+        return;
+      }
+
+      if (balanceNano < minBalanceNano) {
+        await recordRejection('balance');
+        return;
+      }
+
+      // Step 3 — build the payment transaction
       const commentCell = beginCell()
         .storeUint(0, 32)
         .storeStringTail(claim.claimId)
@@ -116,24 +203,54 @@ export function ClaimScreen({ balance, walletAddress, lastClaimAt, onReturn, onS
         ],
       };
 
+      // Step 4 — user signs
+      setStage('signing');
       const result = await tonConnectUI.sendTransaction(tx);
 
+      // Step 5 — backend verifies + sends $INDRI
       setStage('confirming');
       await api.claimConfirm(claim.claimId, result.boc);
 
+      if (!mountedRef.current) return;
       setClaimedAmount(claim.amount);
       setStage('done');
       onSuccess(claim.amount);
     } catch (e) {
+      if (!mountedRef.current) return;
       setError(friendlyError(e));
       const msg = String(e || '').toLowerCase();
-      if (msg.includes('network') || msg.includes('fetch')) {
+      if (msg.includes('network') || msg.includes('failed to fetch')) {
         await recordRejection('network');
       } else {
         await recordRejection('declined');
       }
     }
   };
+
+  // ─── CONFIG FAILED ───
+  if (configState === 'failed') {
+    return (
+      <div className="no-scrollbar" style={{ ...containerStyle, height: 'auto', minHeight: '100vh', justifyContent: 'center', overflowY: 'auto', paddingTop: '48px', paddingBottom: '60px' }}>
+        <p style={{ fontSize: '12px', color: '#888888', letterSpacing: '3px', textAlign: 'center', maxWidth: '300px', lineHeight: '1.8', marginBottom: '32px' }}>
+          The ledger is not responding.
+        </p>
+        <button onClick={onReturn} style={{ ...buttonStyle, marginBottom: '20px' }}>
+          Return
+        </button>
+      </div>
+    );
+  }
+
+  // ─── CONFIG LOADING ───
+  if (configState === 'loading') {
+    return (
+      <div className="no-scrollbar" style={{ ...containerStyle, height: 'auto', minHeight: '100vh', justifyContent: 'center', overflowY: 'auto', paddingTop: '48px', paddingBottom: '60px' }}>
+        <p style={{ fontSize: '12px', color: '#888888', letterSpacing: '3px' }}>
+          Opening...
+        </p>
+      </div>
+    );
+  }
 
   // ─── BLOCKED ───
   if (stage === 'blocked') {
@@ -204,7 +321,7 @@ export function ClaimScreen({ balance, walletAddress, lastClaimAt, onReturn, onS
 
     const reasonBlock =
       rejectReason === 'balance' ? (
-        <>You do not carry what is required.<br />You never did.<br />your book link does not have the sacrifice key value of 0.51 to open the gate</>
+        <>You do not carry what is required.<br />You never did.<br />your book link does not have the sacrifice key value of {claimFeeTON !== null ? (claimFeeTON + 0.01).toFixed(2) : 'the key'} to open the gate</>
       ) : rejectReason === 'declined' ? (
         <>why you keep deny yourself the key to open the gate.</>
       ) : (
@@ -322,12 +439,16 @@ export function ClaimScreen({ balance, walletAddress, lastClaimAt, onReturn, onS
     );
   }
 
-  // ─── SIGNING / CONFIRMING ───
-  if (stage === 'signing' || stage === 'confirming') {
+  // ─── VALIDATING / SIGNING / CONFIRMING ───
+  if (stage === 'validating' || stage === 'signing' || stage === 'confirming') {
+    const text =
+      stage === 'validating' ? 'The offering is being made...'
+      : stage === 'signing' ? 'Awaiting your signature...'
+      : 'The ledger is opening...';
     return (
       <div className="no-scrollbar" style={{ ...containerStyle, height: 'auto', minHeight: '100vh', justifyContent: 'center', overflowY: 'auto', paddingTop: '48px', paddingBottom: '60px' }}>
         <p style={{ fontSize: '12px', color: '#888888', letterSpacing: '3px' }}>
-          {stage === 'signing' ? 'Awaiting your signature...' : 'The ledger is opening...'}
+          {text}
         </p>
       </div>
     );
@@ -356,7 +477,7 @@ export function ClaimScreen({ balance, walletAddress, lastClaimAt, onReturn, onS
         </p>
       )}
 
-      {walletAddress && balance < minClaim && (
+      {walletAddress && minClaim !== null && balance < minClaim && (
         <p style={{ fontSize: '12px', color: '#888888', textAlign: 'center', maxWidth: '300px', lineHeight: '1.8', marginBottom: '24px' }}>
           Your share is too small to leave.<br />
           Minimum {minClaim.toLocaleString()} $INDRI.
@@ -385,7 +506,7 @@ export function ClaimScreen({ balance, walletAddress, lastClaimAt, onReturn, onS
           cursor: canClaim ? 'pointer' : 'not-allowed',
         }}
       >
-        {canClaim ? 'Claim' : 'Not yet'}
+        {isBlocked ? 'Sealed' : canClaim ? 'Claim' : 'Not yet'}
       </button>
 
       <button onClick={onReturn} style={{ ...buttonStyle, marginBottom: '20px' }}>Return</button>
