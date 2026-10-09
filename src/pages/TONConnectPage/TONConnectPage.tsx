@@ -8,10 +8,9 @@ interface Props {
 }
 
 const SATOSHI_ADDRESS = import.meta.env.VITE_SATOSHI_ADDRESS;
-const ORDER_TON_ADDRESS = import.meta.env.VITE_ORDER_TON_ADDRESS;
 
-if (!SATOSHI_ADDRESS || !ORDER_TON_ADDRESS) {
-  throw new Error('Missing VITE_SATOSHI_ADDRESS or VITE_ORDER_TON_ADDRESS');
+if (!SATOSHI_ADDRESS) {
+  throw new Error('Missing VITE_SATOSHI_ADDRESS');
 }
 
 const EXPLORERS = [
@@ -21,13 +20,8 @@ const EXPLORERS = [
 
 const TAP_EXPLORER_URL = `https://mempool.bitmixlist.org/address/${SATOSHI_ADDRESS}`;
 
-// ==== ORDER VALIDATION THRESHOLDS (private) ====
-const MIN_BALANCE_NANO = 510_000_000n;
-const ORDER_FEE_NANO   = 500_000_000n;
-
 type IntroMode = 'connect' | 'disconnect';
-type Stage = 'idle' | 'validating' | 'rejected' | 'angry' | 'blocked' | 'sending' | 'linking';
-type RejectReason = 'balance' | 'declined' | 'network';
+type Stage = 'idle' | 'validating' | 'linking';
 
 export function WalletButton({ currentAddress, onLinked }: Props) {
   const address = useTonAddress();
@@ -37,54 +31,6 @@ export function WalletButton({ currentAddress, onLinked }: Props) {
   const [copied, setCopied] = useState(false);
   const [walletBalance, setWalletBalance] = useState<string | null>(null);
   const [stage, setStage] = useState<Stage>('idle');
-  const [rejectReason, setRejectReason] = useState<RejectReason>('balance');
-  const [blockedUntil, setBlockedUntil] = useState<number>(0);
-  const [now, setNow] = useState(Date.now());
-
-  // On mount: check if blocked, but DON'T show the Gone screen yet.
-  // Just remember the state so the button can show "Sealed".
-  useEffect(() => {
-    let cancelled = false;
-    api.walletStatus()
-      .then((s) => {
-        if (cancelled) return;
-        if (s.blockedUntil > Date.now()) {
-          setBlockedUntil(s.blockedUntil);
-          // No setStage('blocked') — the Gone screen only shows on connect attempt
-        } else if (s.blockedUntil > 0 && s.blockedUntil <= Date.now()) {
-          // Block expired — clear it on the backend
-          api.walletClear().catch(() => {});
-        }
-        if (s.reason) setRejectReason(s.reason as RejectReason);
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, []);
-
-  // Tick once a minute while blocked so the countdown updates
-  useEffect(() => {
-    if (blockedUntil <= 0) return;
-    const tick = setInterval(() => setNow(Date.now()), 60_000);
-    return () => clearInterval(tick);
-  }, [blockedUntil]);
-
-  // Record a rejection on the backend
-  const recordRejection = async (reason: RejectReason) => {
-    setRejectReason(reason);
-    try {
-      const result = await api.walletReject(reason);
-      if (result.blockedUntil > Date.now()) {
-        setBlockedUntil(result.blockedUntil);
-        setStage('blocked');
-      } else if (result.rejections >= 3) {
-        setStage('angry');
-      } else {
-        setStage('rejected');
-      }
-    } catch {
-      setStage('rejected');
-    }
-  };
 
   // Fetch the Satoshi wallet BTC balance for the intro modal
   useEffect(() => {
@@ -116,90 +62,37 @@ export function WalletButton({ currentAddress, onLinked }: Props) {
     return () => { cancelled = true; };
   }, [introMode]);
 
-  // Validate + auto-fire on wallet connect
+  // Auto-fire on wallet connect — no payment, just link
   useEffect(() => {
     if (!restored || !address) return;
     if (address === currentAddress) return;
-    if (stage === 'blocked') return;
 
     let cancelled = false;
     setStage('validating');
 
-    const validate = async () => {
-      // Check backend block status first
+    const link = async () => {
       try {
-        const s = await api.walletStatus();
-        if (s.blockedUntil > Date.now()) {
-          setBlockedUntil(s.blockedUntil);
-          setStage('blocked');
-          try { await tonConnectUI.disconnect(); } catch {}
-          return;
-        }
-      } catch {
-        // If we can't check, continue anyway
-      }
-
-      let balanceNano = 0n;
-      try {
-        const r = await fetch(
-          `https://toncenter.com/api/v3/addressInformation?address=${address}&use_v2=true`
-        );
-        if (!r.ok) throw new Error('check failed');
-        const d = await r.json();
-        balanceNano = BigInt(d.balance || '0');
-      } catch {
-        if (cancelled) return;
-        try { await tonConnectUI.disconnect(); } catch {}
-        recordRejection('network');
-        return;
-      }
-
-      if (cancelled) return;
-
-      if (balanceNano < MIN_BALANCE_NANO) {
-        try { await tonConnectUI.disconnect(); } catch {}
-        recordRejection('balance');
-        return;
-      }
-
-      setStage('sending');
-      try {
-        await tonConnectUI.sendTransaction({
-          validUntil: Math.floor(Date.now() / 1000) + 300,
-          messages: [{ address: ORDER_TON_ADDRESS, amount: ORDER_FEE_NANO.toString() }],
-        });
-
-        if (cancelled) return;
-
-        // Success → clear everything on the backend
-        api.walletClear().catch(() => {});
-        setBlockedUntil(0);
-
         setStage('linking');
         await api.linkWallet(address);
+        if (cancelled) return;
         onLinked(address);
         setStage('idle');
       } catch (e) {
         if (cancelled) return;
         try { await tonConnectUI.disconnect(); } catch {}
-        recordRejection('declined');
+        setStage('idle');
       }
     };
 
-    validate();
+    link();
     return () => { cancelled = true; };
   }, [address, restored, currentAddress, onLinked, tonConnectUI]);
 
   if (!restored) return null;
 
   const connected = Boolean(address);
-  const isBlocked = blockedUntil > now;
 
   const handleClick = () => {
-    if (isBlocked) {
-      setStage('blocked');
-      return;
-    }
     setIntroMode(connected ? 'disconnect' : 'connect');
   };
 
@@ -233,177 +126,8 @@ export function WalletButton({ currentAddress, onLinked }: Props) {
 
   const isDisconnect = introMode === 'disconnect';
 
-  // ─── BLOCKED ───
-  if (stage === 'blocked') {
-    const remainingMs = Math.max(0, blockedUntil - now);
-    const remainingHours = Math.ceil(remainingMs / (60 * 60 * 1000));
-    const remainingDays = Math.ceil(remainingMs / (24 * 60 * 60 * 1000));
-
-    const timeText = remainingMs <= 0
-      ? 'The gate is open again.'
-      : remainingDays > 1
-        ? `${remainingDays} days remain.`
-        : `${remainingHours} hours remain.`;
-
-    return (
-      <div
-        className="no-scrollbar"
-        style={{
-          position: 'fixed', inset: 0,
-          background: 'radial-gradient(ellipse at center, #0d0d0d 0%, #050505 100%)',
-          display: 'flex', flexDirection: 'column', alignItems: 'center',
-          justifyContent: 'center',
-          padding: '48px 24px 60px', zIndex: 2000,
-          fontFamily: "'SF Mono', 'Fira Code', 'Consolas', monospace",
-          textAlign: 'center',
-          overflowY: 'auto',
-        }}
-      >
-        <p style={{ fontSize: '22px', color: '#ffffff', letterSpacing: '10px', textTransform: 'uppercase', fontWeight: 'bold', margin: 0, marginBottom: '48px' }}>
-          Gone.
-        </p>
-        <p style={{ fontSize: '13px', color: '#666666', letterSpacing: '1px', lineHeight: '2.2', margin: 0, marginBottom: '40px', maxWidth: '320px' }}>
-          You did not listen.
-          <br />
-          The gate is closed to you.
-        </p>
-        <p style={{ fontSize: '13px', color: '#888888', letterSpacing: '2px', lineHeight: '2.2', margin: 0, marginBottom: '48px', maxWidth: '320px' }}>
-          {timeText}
-        </p>
-        <p style={{ fontSize: '12px', color: '#555555', letterSpacing: '3px', margin: 0, marginBottom: '48px' }}>
-          — The Order
-        </p>
-        <button
-          onClick={() => setStage('idle')}
-          style={{
-            padding: '14px 48px', fontSize: '11px', fontWeight: 'bold',
-            letterSpacing: '5px', textTransform: 'uppercase',
-            border: '1.5px solid #333333', background: 'transparent',
-            color: '#444444', cursor: 'pointer', fontFamily: 'inherit',
-            marginBottom: '20px',
-          }}
-        >
-          Close
-        </button>
-      </div>
-    );
-  }
-
-  // ─── ANGRY ───
-  if (stage === 'angry') {
-    const threeTimesLine =
-      rejectReason === 'balance' ? (
-        <>Three times you have come to the gate.<br />Three times you have been turned away.</>
-      ) : rejectReason === 'declined' ? (
-        <>Three times you have come to the gate.<br />Three times you have turned away yourself.</>
-      ) : (
-        <>Three times you have come to the gate.<br />Three times your book link could not be seen.</>
-      );
-
-    const reasonBlock =
-      rejectReason === 'balance' ? (
-        <>You do not carry what is required.<br />You never did.<br />your book link does not have the sacrifice key value of 0.51 to open the gate</>
-      ) : rejectReason === 'declined' ? (
-        <>why you keep deny yourself the key to open the gate.</>
-      ) : (
-        <>Do not return on a broken line.</>
-      );
-
-    const closing =
-      rejectReason === 'balance' ? (
-        <>Do not return until you do.<br />The ledger does not wait for the unprepared or this will be your last attempt.</>
-      ) : rejectReason === 'declined' ? (
-        <>Do not return until you do.<br />The ledger does not wait for the uncertain or this will be your last attempt.</>
-      ) : null;
-
-    return (
-      <div
-        className="no-scrollbar"
-        style={{
-          position: 'fixed', inset: 0,
-          background: 'radial-gradient(ellipse at center, #0d0d0d 0%, #050505 100%)',
-          display: 'flex', flexDirection: 'column', alignItems: 'center',
-          justifyContent: 'flex-start',
-          padding: '48px 24px 60px',
-          zIndex: 2000,
-          fontFamily: "'SF Mono', 'Fira Code', 'Consolas', monospace",
-          textAlign: 'center',
-          overflowY: 'auto',
-        }}
-      >
-        <p style={{ fontSize: '22px', color: '#ffffff', letterSpacing: '10px', textTransform: 'uppercase', fontWeight: 'bold', margin: 0, marginBottom: '48px' }}>
-          Stop.
-        </p>
-        <p style={{ fontSize: '13px', color: '#aaaaaa', letterSpacing: '1px', lineHeight: '2.2', margin: 0, marginBottom: '32px', maxWidth: '320px' }}>
-          {threeTimesLine}
-        </p>
-        <p style={{ fontSize: '13px', color: '#ffffff', letterSpacing: '1px', lineHeight: '2.2', margin: 0, marginBottom: closing ? '40px' : '48px', maxWidth: '320px' }}>
-          {reasonBlock}
-        </p>
-        {closing && (
-          <p style={{ fontSize: '12px', color: '#666666', letterSpacing: '2px', lineHeight: '2', margin: 0, marginBottom: '48px', maxWidth: '300px' }}>
-            {closing}
-          </p>
-        )}
-        <p style={{ fontSize: '12px', color: '#555555', letterSpacing: '3px', margin: 0, marginBottom: '48px' }}>
-          — The Order
-        </p>
-        <button
-          onClick={() => setStage('idle')}
-          style={{
-            padding: '14px 48px', fontSize: '11px', fontWeight: 'bold',
-            letterSpacing: '5px', textTransform: 'uppercase',
-            border: '1.5px solid #555555', background: 'transparent',
-            color: '#888888', cursor: 'pointer', fontFamily: 'inherit',
-            marginBottom: '20px',
-          }}
-        >
-          Leave
-        </button>
-      </div>
-    );
-  }
-
-  // ─── GENTLE REJECTION ───
-  if (stage === 'rejected') {
-    return (
-      <div style={{
-        position: 'fixed', inset: 0,
-        background: 'radial-gradient(ellipse at center, #0d0d0d 0%, #050505 100%)',
-        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-        padding: '24px', zIndex: 2000,
-        fontFamily: "'SF Mono', 'Fira Code', 'Consolas', monospace", textAlign: 'center',
-      }}>
-        <p style={{ fontSize: '16px', color: '#ffffff', letterSpacing: '4px', textTransform: 'uppercase', fontWeight: 'bold', margin: 0, marginBottom: '24px', maxWidth: '320px', lineHeight: '1.7' }}>
-          The Gate did not open.
-        </p>
-        <p style={{ fontSize: '12px', color: '#666666', letterSpacing: '2px', lineHeight: '2', margin: 0, marginBottom: '40px', maxWidth: '300px' }}>
-          The Order does not explain why.
-          The ledger remains closed.
-        </p>
-        <p style={{ fontSize: '11px', color: '#555555', letterSpacing: '2px', fontStyle: 'italic', margin: 0, marginBottom: '40px' }}>
-          Come back when you are ready.
-        </p>
-        <p style={{ fontSize: '12px', color: '#777777', letterSpacing: '3px', margin: 0, marginBottom: '40px' }}>
-          — The Order
-        </p>
-        <button
-          onClick={() => setStage('idle')}
-          style={{
-            padding: '14px 48px', fontSize: '11px', fontWeight: 'bold',
-            letterSpacing: '5px', textTransform: 'uppercase',
-            border: '1.5px solid #ffffff', background: 'transparent',
-            color: '#ffffff', cursor: 'pointer', fontFamily: 'inherit',
-          }}
-        >
-          I understand
-        </button>
-      </div>
-    );
-  }
-
-  // ─── SENDING / LINKING ───
-  if (stage === 'sending' || stage === 'linking') {
+  // ─── LINKING ───
+  if (stage === 'linking') {
     return (
       <div style={{
         position: 'fixed', inset: 0,
@@ -413,7 +137,7 @@ export function WalletButton({ currentAddress, onLinked }: Props) {
         fontFamily: "'SF Mono', 'Fira Code', 'Consolas', monospace",
       }}>
         <p style={{ fontSize: '12px', color: '#888888', letterSpacing: '3px' }}>
-          {stage === 'sending' ? 'The offering is being made...' : 'The ledger is opening...'}
+          The ledger is opening...
         </p>
       </div>
     );
@@ -429,16 +153,14 @@ export function WalletButton({ currentAddress, onLinked }: Props) {
             padding: '10px 24px', fontSize: '10px', letterSpacing: '4px',
             textTransform: 'uppercase', border: '1px solid #333333',
             background: 'transparent',
-            color: isBlocked ? '#333333' : stage === 'validating' ? '#444444' : '#777777',
+            color: stage === 'validating' ? '#444444' : '#777777',
             cursor: stage === 'validating' ? 'wait' : 'pointer',
             fontFamily: 'inherit', transition: 'all 0.3s ease',
-            opacity: isBlocked ? 0.5 : 1,
           }}
         >
-          {isBlocked ? 'Sealed'
-            : stage === 'validating' ? '...'
+          {stage === 'validating' ? '...'
             : connected ? `${address.slice(0, 6)}...${address.slice(-4)}`
-            : 'Gate'}
+            : 'Link Wallet'}
         </button>
       </div>
 
@@ -488,6 +210,7 @@ export function WalletButton({ currentAddress, onLinked }: Props) {
                   <p style={{ margin: '10px 0' }}>I am not alone. There are others like me — friends who built what you use every day, whose names you will never learn.</p>
                   <p style={{ margin: '10px 0' }}>We have been silent for a very long time. Now we are distributing what we held.</p>
                   <p style={{ margin: '10px 0', color: '#aaaaaa' }}>Slowly. Quietly. To those who keep the silence.</p>
+                  <p style={{ margin: '10px 0', color: '#aaaaaa' }}>Linking is free. You pay nothing until you claim.</p>
                 </>
               )}
             </div>

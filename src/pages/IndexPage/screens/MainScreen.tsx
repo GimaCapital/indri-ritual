@@ -253,7 +253,6 @@
 //   );
 // }
 
-
 import { Sigil } from '../components/Sigil';
 import { OrderVoice } from '../components/OrderVoice';
 import { WatchingPulse } from '../components/WatchingPulse';
@@ -289,6 +288,7 @@ interface Props {
   onGoTo: (screen: string) => void;
   isAdmin: boolean;
   onGoToAdmin: () => void;
+  minClaim: number;
 }
 
 export function MainScreen(props: Props) {
@@ -300,13 +300,14 @@ export function MainScreen(props: Props) {
     walletAddress, signalsQueued, signalsArrived,
     onStartStay, onStopStay, onSigilTap, onSignal,
     onWalletLinked, onGoTo, isAdmin, onGoToAdmin,
+    minClaim,
   } = props;
 
   const currentRank = getRank(silentDays);
   const currentMultiplier = getMultiplier(silentDays);
 
   const showSignalStats = signalsQueued > 0 || signalsArrived > 0;
-  const canClaim = Boolean(walletAddress) && balance >= 1000;
+  const canClaim = Boolean(walletAddress) && balance >= minClaim;
 
   return (
     <div style={{

@@ -58,6 +58,7 @@ export function IndexPage() {
   const [exitCountdown, setExitCountdown] = useState<number | null>(null);
   const [signalCooldown, setSignalCooldown] = useState(false);
   const [sigilTaps, setSigilTaps] = useState(0);
+  const [minClaim, setMinClaim] = useState(1000);
 
   const intervalRef = useRef<number | null>(null);
   const holdTimeoutRef = useRef<number | null>(null);
@@ -102,6 +103,17 @@ export function IndexPage() {
       }
     };
     authenticate();
+  }, []);
+
+  // Fetch backend config once — keeps MIN_CLAIM_AMOUNT in sync
+  useEffect(() => {
+    api.publicConfig()
+      .then((c) => {
+        if (typeof c.minClaimAmount === 'number' && c.minClaimAmount > 0) {
+          setMinClaim(c.minClaimAmount);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   // Save screen to localStorage
@@ -451,7 +463,7 @@ export function IndexPage() {
       <LedgerScreen
         onReturn={() => setScreen('main')}
         onGoToClaim={() => setScreen('claim')}
-        canClaim={Boolean(user?.walletAddress) && (user?.balance || 0) >= 1000}
+        canClaim={Boolean(user?.walletAddress) && (user?.balance || 0) >= minClaim}
       />
     );
   }
@@ -529,6 +541,7 @@ export function IndexPage() {
       onWalletLinked={(address) => {
         if (user) setUser({ ...user, walletAddress: address });
       }}
+      minClaim={minClaim}
     />
   );
 }

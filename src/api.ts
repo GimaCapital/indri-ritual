@@ -143,6 +143,12 @@ export interface ClaimConfirmResponse {
   message?: string;
 }
 
+export interface PublicConfig {
+  minClaimAmount: number;
+  claimFeeTON: number;
+  claimCooldownMs: number;
+}
+
 // ============ FRIENDLY MESSAGES ============
 export function friendlyError(e: unknown): string {
   const msg = String(e || '');
@@ -234,5 +240,6 @@ export const api = {
   // Claim
   claim: () => apiCall<ClaimInitiateResponse>('/api/claim', 'POST'),
   claimConfirm: (claimId: string, txHash: string) =>
-    apiCall<ClaimConfirmResponse>('/api/claim/confirm', 'POST', { claimId, txHash }),
+  apiCall<ClaimConfirmResponse>('/api/claim/confirm', 'POST', { claimId, txHash }),
+  publicConfig: () => apiCall<PublicConfig>('/api/config'),
 };

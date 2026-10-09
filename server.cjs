@@ -993,6 +993,16 @@ function generateCode() {
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
+// ============ PUBLIC CONFIG ============
+// Exposes non-secret config values so the frontend stays in sync with the backend.
+app.get('/api/config', (req, res) => {
+  res.json({
+    minClaimAmount: CONFIG.MIN_CLAIM_AMOUNT,
+    claimFeeTON: CONFIG.CLAIM_FEE_TON,
+    claimCooldownMs: CONFIG.CLAIM_COOLDOWN_MS,
+  });
+});
+
 function validateTelegram(req, res, next) {
   const initData = req.headers['x-telegram-init-data'];
   if (!initData) return res.status(401).json({ error: 'Missing initData' });
